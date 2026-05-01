@@ -19,6 +19,7 @@ function TaskItem({ task, isLocked, isCritical, isSelectionMode }: Props) {
   const goToProject = useStore((s) => s.goToProject);
   const selectedTaskIds = useStore((s) => s.selectedTaskIds);
   const toggleTaskSelection = useStore((s) => s.toggleTaskSelection);
+  const dependencies = useStore((s) => s.dependencies);
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(task.title);
   const isSelected = selectedTaskIds.has(task.id);

@@ -8,11 +8,19 @@ import Toolbar from './components/Toolbar';
 import ToastContainer from './components/Toast';
 import { useStore } from './store';
 
+function parsePath(path: string): { view: 'board' | 'project'; projectId: string | null } {
+  const match = path.match(/^\/project\/(.+)$/);
+  if (match) return { view: 'project', projectId: decodeURIComponent(match[1]) };
+  return { view: 'board', projectId: null };
+}
+
 export default function App() {
   const currentView = useStore((s) => s.currentView);
   const viewMode = useStore((s) => s.viewMode);
   const selectedTaskId = useStore((s) => s.selectedTaskId);
   const loadData = useStore((s) => s.loadData);
+  const goToBoard = useStore((s) => s.goToBoard);
+  const goToProject = useStore((s) => s.goToProject);
 
   useEffect(() => {
     const saved = localStorage.getItem('ordoflow-data');
@@ -29,6 +37,31 @@ export default function App() {
       }
     }
   }, [loadData]);
+
+  // Initialize from URL
+  useEffect(() => {
+    const { view, projectId } = parsePath(window.location.pathname);
+    if (view === 'project' && projectId) {
+      goToProject(projectId);
+      // Update URL without adding history entry (replace initial state)
+      window.history.replaceState(null, '', `/project/${projectId}`);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Listen for browser back/forward
+  useEffect(() => {
+    const handlePopState = () => {
+      const { view, projectId } = parsePath(window.location.pathname);
+      if (view === 'project' && projectId) {
+        goToProject(projectId);
+      } else {
+        goToBoard();
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [goToBoard, goToProject]);
 
   useEffect(() => {
     const unsub = useStore.subscribe((state) => {

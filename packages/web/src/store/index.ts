@@ -175,8 +175,15 @@ export const useStore = create<OrdoFlowState>((set, get) => ({
     set({ selectedTaskIds: new Set() });
   },
 
-  goToBoard: () => set({ currentView: 'board', currentProjectId: null, selectedTaskId: null }),
-  goToProject: (id) => set({ currentView: 'project', currentProjectId: id, selectedTaskId: null, viewMode: 'list' }),
+  goToBoard: () => {
+    window.history.pushState(null, '', '/');
+    set({ currentView: 'board', currentProjectId: null, selectedTaskId: null });
+  },
+
+  goToProject: (id) => {
+    window.history.pushState(null, '', `/project/${id}`);
+    set({ currentView: 'project', currentProjectId: id, selectedTaskId: null, viewMode: 'list' });
+  },
 
   setViewMode: (mode) => set({ viewMode: mode }),
   setSortMode: (parentId, mode) => {

@@ -91,6 +91,7 @@ export default function TaskList() {
             key={i}
             layerIndex={i}
             tasks={layer}
+            allTasks={sorted}
             isActionable={i === actionableIndex}
             criticalTaskIds={criticalTaskIds}
             isSelectionMode={isSelectionMode}

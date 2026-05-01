@@ -14,12 +14,13 @@ const sortOptions: { value: SortMode; label: string }[] = [
 interface Props {
   layerIndex: number;
   tasks: Task[];
+  allTasks: Task[];
   isActionable: boolean;
   criticalTaskIds: Set<string>;
   isSelectionMode?: boolean;
 }
 
-export default function LayerSection({ layerIndex, tasks, isActionable, criticalTaskIds, isSelectionMode }: Props) {
+export default function LayerSection({ layerIndex, tasks, allTasks, isActionable, criticalTaskIds, isSelectionMode }: Props) {
   const sortModes = useStore((s) => s.sortModes);
   const setSortMode = useStore((s) => s.setSortMode);
   const currentProjectId = useStore((s) => s.currentProjectId);
@@ -32,7 +33,7 @@ export default function LayerSection({ layerIndex, tasks, isActionable, critical
     if (task.status === 'done') return false;
     const deps = dependencies.filter((d) => d.toTaskId === task.id);
     return deps.some((d) => {
-      const depTask = tasks.find((t) => t.id === d.fromTaskId);
+      const depTask = allTasks.find((t) => t.id === d.fromTaskId);
       return depTask && depTask.status !== 'done';
     });
   };
