@@ -8,3 +8,8 @@ export { getEffectiveStatus, sortSiblings, getLayers, wouldCreateCycle, type Sor
 export { calculateCriticalPath } from './critical-path';
 export { calculateProgress, formatTimeRemaining } from './progress';
 export type { TaskProgress } from './progress';
+export {
+  serializeState, serializeProject, extractProject,
+  validateImport, mergeImport,
+} from './export';
+export type { ExportPayload, ImportValidationResult, MergeResult } from './export';

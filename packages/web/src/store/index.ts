@@ -6,6 +6,11 @@ import {
   updateTaskInTree, removeTaskFromTree, addSubtaskToTree,
   wouldCreateCycle,
 } from '@ordoflow/core';
+import type { ExportPayload, MergeResult } from '@ordoflow/core';
+import {
+  serializeState, serializeProject, extractProject,
+  validateImport, mergeImport,
+} from '@ordoflow/core';
 import type { AIConfig } from '../ai';
 import { PROVIDER_DEFAULTS } from '../ai';
 
@@ -67,6 +72,14 @@ interface OrdoFlowState {
 
   // Data
   loadData: (data: { root?: Task; inbox?: Task; dependencies?: Dependency[] }) => void;
+
+  // Import/Export
+  importPreview: ExportPayload | null;
+  startImport: (raw: string) => { valid: false; errors: string[] } | { valid: true };
+  doImport: (mode: 'replace' | 'merge') => void;
+  cancelImport: () => void;
+  exportAll: () => void;
+  exportProject: (projectId: string) => void;
 }
 
 export const useStore = create<OrdoFlowState>((set, get) => ({
@@ -80,6 +93,7 @@ export const useStore = create<OrdoFlowState>((set, get) => ({
   viewMode: 'list',
   sortModes: {},
   aiConfig: loadAIConfig(),
+  importPreview: null,
 
   addTopLevelTask: (title) => {
     const task = createTask(title, { id: nanoid() });
@@ -216,4 +230,89 @@ export const useStore = create<OrdoFlowState>((set, get) => ({
     inbox: data.inbox || createInbox(),
     dependencies: data.dependencies || [],
   }),
+
+  startImport: (raw) => {
+    const result = validateImport(raw);
+    if (!result.valid) return result;
+    set({ importPreview: result.data });
+    return { valid: true as const };
+  },
+
+  doImport: (mode) => {
+    const { root, inbox, dependencies, importPreview } = get();
+    if (!importPreview) return;
+
+    if (mode === 'replace') {
+      // Auto-backup before replacing
+      try {
+        const backup = serializeState(root, inbox, dependencies);
+        const blob = new Blob([backup], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `ordoflow-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch {}
+
+      set({
+        root: importPreview.data.root,
+        inbox: importPreview.data.inbox,
+        dependencies: importPreview.data.dependencies,
+        importPreview: null,
+        currentView: 'board',
+        currentProjectId: null,
+        selectedTaskId: null,
+      });
+    } else {
+      const result = mergeImport(root, inbox, dependencies, importPreview);
+      set({
+        root: result.root,
+        inbox: result.inbox,
+        dependencies: result.dependencies,
+        importPreview: null,
+      });
+      window.dispatchEvent(new CustomEvent('ordoflow-toast', {
+        detail: {
+          message: `Imported. Skipped ${result.skipped} duplicates, ${result.cycleSkips} cycles.`,
+          type: 'info',
+        },
+      }));
+    }
+  },
+
+  cancelImport: () => set({ importPreview: null }),
+
+  exportAll: () => {
+    const { root, inbox, dependencies } = get();
+    const json = serializeState(root, inbox, dependencies);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ordoflow-all-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
+
+  exportProject: (projectId) => {
+    const { root, dependencies } = get();
+    const json = serializeProject(root, projectId, dependencies);
+    if (!json) return;
+    const project = extractProject(root, projectId);
+    const name = project?.title?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project';
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ordoflow-${name}-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
 }));

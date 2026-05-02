@@ -4,6 +4,7 @@ import Board from './components/Board';
 import TaskList from './components/TaskList';
 import Canvas from './components/Canvas';
 import DetailPanel from './components/DetailPanel';
+import ImportModal from './components/ImportModal';
 import Toolbar from './components/Toolbar';
 import ToastContainer from './components/Toast';
 import { useStore } from './store';
@@ -21,6 +22,7 @@ export default function App() {
   const loadData = useStore((s) => s.loadData);
   const goToBoard = useStore((s) => s.goToBoard);
   const goToProject = useStore((s) => s.goToProject);
+  const startImport = useStore((s) => s.startImport);
 
   useEffect(() => {
     const saved = localStorage.getItem('ordoflow-data');
@@ -38,17 +40,14 @@ export default function App() {
     }
   }, [loadData]);
 
-  // Initialize from URL
   useEffect(() => {
     const { view, projectId } = parsePath(window.location.pathname);
     if (view === 'project' && projectId) {
       goToProject(projectId);
-      // Update URL without adding history entry (replace initial state)
       window.history.replaceState(null, '', `/project/${projectId}`);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Listen for browser back/forward
   useEffect(() => {
     const handlePopState = () => {
       const { view, projectId } = parsePath(window.location.pathname);
@@ -74,6 +73,37 @@ export default function App() {
     return unsub;
   }, []);
 
+  // Drag & drop import
+  useEffect(() => {
+    const handleDragOver = (e: DragEvent) => {
+      e.preventDefault();
+    };
+
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault();
+      const file = e.dataTransfer?.files?.[0];
+      if (!file || !file.name.endsWith('.json')) return;
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = startImport(reader.result as string);
+        if (!result.valid) {
+          window.dispatchEvent(new CustomEvent('ordoflow-toast', {
+            detail: { message: result.errors.join('. '), type: 'error' },
+          }));
+        }
+      };
+      reader.readAsText(file);
+    };
+
+    window.addEventListener('dragover', handleDragOver);
+    window.addEventListener('drop', handleDrop);
+    return () => {
+      window.removeEventListener('dragover', handleDragOver);
+      window.removeEventListener('drop', handleDrop);
+    };
+  }, [startImport]);
+
   return (
     <ReactFlowProvider>
       <div className="app">
@@ -88,6 +118,7 @@ export default function App() {
           )}
         </main>
         {selectedTaskId && <DetailPanel />}
+        <ImportModal />
         <ToastContainer />
       </div>
     </ReactFlowProvider>

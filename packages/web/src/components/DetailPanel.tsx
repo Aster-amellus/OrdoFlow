@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import type { EnergyLevel } from '@ordoflow/core';
+import type { EnergyLevel, Task } from '@ordoflow/core';
 import { calculateProgress, formatTimeRemaining, findTaskById } from '@ordoflow/core';
 import { useStore } from '../store';
+import { callAI, parseAIResponse } from '../ai';
 
 export default function DetailPanel() {
   const selectedTaskId = useStore((s) => s.selectedTaskId);
@@ -15,6 +16,7 @@ export default function DetailPanel() {
   const addSubtask = useStore((s) => s.addSubtask);
   const addDependency = useStore((s) => s.addDependency);
   const deleteDependency = useStore((s) => s.deleteDependency);
+  const aiConfig = useStore((s) => s.aiConfig);
 
   const task = selectedTaskId
     ? findTaskById(inbox, selectedTaskId) || findTaskById(root, selectedTaskId)
@@ -28,6 +30,7 @@ export default function DetailPanel() {
   const [priority, setPriority] = useState(2);
   const [newChildTitle, setNewChildTitle] = useState('');
   const [newDepId, setNewDepId] = useState('');
+  const [isRefining, setIsRefining] = useState(false);
 
   useEffect(() => {
     if (task) {
@@ -55,23 +58,46 @@ export default function DetailPanel() {
 
   const handleDelete = () => { deleteTask(task.id); selectTask(null); };
 
+  const handleRefine = async () => {
+    if (!aiConfig.apiKey || isRefining) return;
+    setIsRefining(true);
+    try {
+      const raw = await callAI(aiConfig, `Break down this task into 3-8 smaller subtasks with dependencies:\nTitle: ${task.title}\nDescription: ${task.description || 'none'}\nEstimated time: ${task.estimatedMinutes || 0} minutes\n\nTasks should sum to approximately ${task.estimatedMinutes || 60} minutes.`);
+      const parsed = parseAIResponse(raw);
+      for (const t of parsed.tasks) {
+        addSubtask(task.id, t.title, {
+          estimatedMinutes: t.estimatedMinutes,
+          energyLevel: t.energyLevel as any,
+        });
+      }
+      window.dispatchEvent(new CustomEvent('ordoflow-toast', {
+        detail: { message: `AI broke down into ${parsed.tasks.length} subtasks`, type: 'info' },
+      }));
+    } catch (err: any) {
+      window.dispatchEvent(new CustomEvent('ordoflow-toast', {
+        detail: { message: err.message || 'Refine failed', type: 'error' },
+      }));
+    } finally {
+      setIsRefining(false);
+    }
+  };
+
   const progress = calculateProgress(task);
   const timeLeft = formatTimeRemaining(progress.estimatedMinutesRemaining);
 
-  // Find parent to get siblings for dependency dropdown
-  const parent = findTaskById(root, task.id) ? null : null; // simplified
   const blockedBy = dependencies.filter((d) => d.toTaskId === task.id);
   const blocking = dependencies.filter((d) => d.fromTaskId === task.id);
 
-  // Get all tasks at same level for dep dropdown
   const allTasks: { id: string; title: string }[] = [];
-  const collectLeaves = (t: { id: string; title: string; subtasks: any[] }) => {
+  const collectLeaves = (t: Task) => {
     if (t.subtasks.length === 0) allTasks.push({ id: t.id, title: t.title });
     else t.subtasks.forEach(collectLeaves);
   };
   collectLeaves(root);
   collectLeaves(inbox);
   const availableDeps = allTasks.filter((t) => t.id !== task.id);
+
+  const estimated = task.estimatedMinutes || 0;
 
   return (
     <div className="detail-overlay" onClick={() => selectTask(null)}>
@@ -98,6 +124,16 @@ export default function DetailPanel() {
               <input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} onBlur={handleSave} className="field-input" />
             </div>
           </div>
+
+          {estimated >= 60 && task.subtasks.length === 0 && aiConfig.apiKey && (
+            <button
+              onClick={handleRefine}
+              disabled={isRefining}
+              className="ai-refine-btn"
+            >
+              {isRefining ? 'Refining...' : `✨ Refine — break down ${estimated >= 120 ? `${Math.floor(estimated / 60)}h` : `${estimated}m`} task`}
+            </button>
+          )}
 
           <label className="field-label">Priority</label>
           <div className="priority-options">

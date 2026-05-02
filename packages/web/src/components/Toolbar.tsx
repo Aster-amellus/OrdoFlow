@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useStore } from '../store';
 import { INBOX_ID, findTaskById } from '@ordoflow/core';
 import { callAI, parseAIResponse, PROVIDER_DEFAULTS, type AIProvider } from '../ai';
@@ -19,11 +19,14 @@ export default function Toolbar() {
   const addDependency = useStore((s) => s.addDependency);
   const aiConfig = useStore((s) => s.aiConfig);
   const setAIConfig = useStore((s) => s.setAIConfig);
+  const exportAll = useStore((s) => s.exportAll);
+  const startImport = useStore((s) => s.startImport);
 
   const [showSettings, setShowSettings] = useState(false);
   const [aiInput, setAiInput] = useState('');
   const [aiFlowStep, setAiFlowStep] = useState<AIFlowStep>('input');
   const [showAIModal, setShowAIModal] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // AI confirmation state
   const [targetProjectId, setTargetProjectId] = useState<string>('');
@@ -251,6 +254,35 @@ User wants to: ${aiInput}`;
               <button onClick={() => setShowSettings(false)} className="btn-secondary">Cancel</button>
               <button onClick={handleSaveSettings} className="btn-primary">Save</button>
             </div>
+
+            <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '16px 0' }} />
+
+            <label className="field-label">Data</label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={exportAll} className="btn-secondary" style={{ flex: 1 }}>Export All</button>
+              <button onClick={() => fileInputRef.current?.click()} className="btn-secondary" style={{ flex: 1 }}>Import</button>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const result = startImport(reader.result as string);
+                  if (!result.valid) {
+                    window.dispatchEvent(new CustomEvent('ordoflow-toast', {
+                      detail: { message: result.errors.join('. '), type: 'error' },
+                    }));
+                  }
+                };
+                reader.readAsText(file);
+                e.target.value = '';
+              }}
+            />
           </div>
         </div>
       )}

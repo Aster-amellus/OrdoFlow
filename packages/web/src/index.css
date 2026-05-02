@@ -328,6 +328,17 @@ code, .mono { font-family: 'JetBrains Mono', monospace; font-size: 0.85em; }
 
 .detail-footer { margin-top: auto; padding-top: 16px; border-top: 1px solid var(--border); }
 
+/* AI refine button */
+.ai-refine-btn {
+  width: 100%; padding: 7px 14px; margin-top: 4px;
+  border: 1px dashed var(--accent); border-radius: var(--radius);
+  background: var(--accent-light); color: var(--accent);
+  font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
+  transition: all 0.15s; text-align: center;
+}
+.ai-refine-btn:hover { border-style: solid; background: var(--accent); color: #fff; }
+.ai-refine-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .btn-primary, .btn-secondary, .btn-danger {
   padding: 7px 14px; border: 1px solid transparent; border-radius: var(--radius);
   font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s;
@@ -389,3 +400,10 @@ code, .mono { font-family: 'JetBrains Mono', monospace; font-size: 0.85em; }
 .react-flow__controls-button { background: var(--bg-card) !important; color: var(--text-primary) !important; border-bottom: 1px solid var(--border) !important; }
 .react-flow__controls-button:hover { background: var(--bg-secondary) !important; }
 .react-flow__minimap { background: var(--bg-card) !important; border: 1px solid var(--border) !important; border-radius: var(--radius) !important; }
+
+/* Import modal */
+.import-stat { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; }
+.import-stat span:first-child { color: var(--text-muted); }
+.import-stat span:last-child { color: var(--text-primary); font-weight: 500; }
+.import-mode-btn { display: flex; align-items: center; flex: 1; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 13px; color: var(--text-secondary); cursor: pointer; transition: all 0.15s; }
+.import-mode-btn:hover { border-color: var(--border-hover); }

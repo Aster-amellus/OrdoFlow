@@ -9,6 +9,7 @@ export default function Board() {
   const addTopLevelTask = useStore((s) => s.addTopLevelTask);
   const deleteTask = useStore((s) => s.deleteTask);
   const selectTask = useStore((s) => s.selectTask);
+  const exportProject = useStore((s) => s.exportProject);
   const [isAdding, setIsAdding] = useState(false);
   const [newName, setNewName] = useState('');
 
@@ -80,6 +81,13 @@ export default function Board() {
                     title="Edit project details"
                   >
                     ✎
+                  </button>
+                  <button
+                    className="board-project-action"
+                    onClick={(e) => { e.stopPropagation(); exportProject(project.id); }}
+                    title="Export project"
+                  >
+                    ↥
                   </button>
                   <button
                     className="board-project-action board-project-action-danger"
