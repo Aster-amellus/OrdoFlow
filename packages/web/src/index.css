@@ -3,51 +3,71 @@
 @tailwind utilities;
 
 :root {
-  --bg-primary: #fff8fc;
-  --bg-secondary: #f7f1fb;
-  --bg-card: #ffffff;
-  --bg-input: #fffdfd;
-  --text-primary: #332d3d;
-  --text-secondary: #675e72;
-  --text-muted: #a292a7;
-  --border: #eadce8;
-  --border-hover: #d9bfd2;
-  --accent: #e36f9d;
-  --accent-hover: #cc5b89;
-  --accent-light: rgba(227, 111, 157, 0.12);
-  --danger: #d96565;
-  --danger-hover: #bd4f4f;
-  --warning: #d79b45;
-  --edge: #c5a7bd;
-  --shadow-sm: 0 2px 5px rgba(77, 44, 66, 0.045);
-  --shadow-md: 0 8px 24px rgba(77, 44, 66, 0.09);
+  --bg-primary: #f3f0ea;
+  --bg-secondary: #f1ede6;
+  --bg-card: #fcfbf8;
+  --bg-input: #fffdfa;
+  --text-primary: #1f2933;
+  --text-secondary: #586270;
+  --text-muted: #8b95a1;
+  --border: #ddd6ca;
+  --border-hover: #c8bba8;
+  --accent: #b56c88;
+  --accent-hover: #944f69;
+  --accent-light: rgba(181, 108, 136, 0.14);
+  --accent-alt: #8a6aa6;
+  --accent-alt-hover: #6d4f87;
+  --accent-alt-light: rgba(138, 106, 166, 0.14);
+  --success: #6e927b;
+  --success-hover: #54725f;
+  --success-light: rgba(110, 146, 123, 0.14);
+  --danger: #b77872;
+  --danger-hover: #925650;
+  --danger-light: rgba(183, 120, 114, 0.14);
+  --warning: #b8914e;
+  --warning-hover: #8b6b33;
+  --warning-light: rgba(184, 145, 78, 0.16);
+  --warning-border: rgba(184, 145, 78, 0.36);
+  --edge: #8a6aa6;
+  --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 12px 30px rgba(15, 23, 42, 0.08);
   --radius: 8px;
-  --progress-bg: #f0e5ef;
-  --progress-fill: #7bc8b0;
+  --progress-bg: #e6dfd5;
+  --progress-fill: var(--success);
   --toolbar-height: 48px;
 }
 
 [data-theme="dark"] {
-  --bg-primary: #19161d;
-  --bg-secondary: #211d27;
-  --bg-card: #292330;
-  --bg-input: #211c28;
-  --text-primary: #f2eaf2;
-  --text-secondary: #c8b9c8;
-  --text-muted: #8f8090;
-  --border: #46394a;
-  --border-hover: #62516a;
-  --accent: #ff9ac0;
-  --accent-hover: #ffb1cf;
-  --accent-light: rgba(255, 154, 192, 0.12);
-  --danger: #ee8383;
-  --danger-hover: #f49a9a;
-  --warning: #e5b264;
-  --edge: #a98ea6;
-  --shadow-sm: 0 2px 6px rgba(0,0,0,0.22);
-  --shadow-md: 0 8px 24px rgba(0,0,0,0.3);
-  --progress-bg: #413546;
-  --progress-fill: #8ad6c1;
+  --bg-primary: #11161c;
+  --bg-secondary: #192029;
+  --bg-card: #222b36;
+  --bg-input: #192029;
+  --text-primary: #edf2f7;
+  --text-secondary: #c1cad5;
+  --text-muted: #94a1b2;
+  --border: #32404f;
+  --border-hover: #45576a;
+  --accent: #d79ab3;
+  --accent-hover: #efbdd1;
+  --accent-light: rgba(215, 154, 179, 0.18);
+  --accent-alt: #b79ed5;
+  --accent-alt-hover: #d5c4eb;
+  --accent-alt-light: rgba(183, 158, 213, 0.2);
+  --success: #99bca5;
+  --success-hover: #c8e1cf;
+  --success-light: rgba(153, 188, 165, 0.18);
+  --danger: #d49a93;
+  --danger-hover: #e9beb8;
+  --danger-light: rgba(212, 154, 147, 0.2);
+  --warning: #dfbe85;
+  --warning-hover: #efd7ad;
+  --warning-light: rgba(223, 190, 133, 0.2);
+  --warning-border: rgba(223, 190, 133, 0.38);
+  --edge: #b79ed5;
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.22);
+  --shadow-md: 0 12px 30px rgba(0,0,0,0.32);
+  --progress-bg: #2b3644;
+  --progress-fill: var(--success);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -167,7 +187,7 @@ code, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monosp
 }
 .board-project-item:hover .board-project-action { opacity: 1; }
 .board-project-action:hover { color: var(--accent); background: var(--accent-light); }
-.board-project-action-danger:hover { color: var(--danger); background: rgba(217, 101, 101, 0.1); }
+.board-project-action-danger:hover { color: var(--danger); background: var(--danger-light); }
 
 /* Quick Add */
 .quick-add {
@@ -241,7 +261,7 @@ code, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monosp
 }
 .layer-badge-waiting {
   display: inline-block; padding: 1px 8px; border-radius: var(--radius);
-  background: var(--accent-light); color: var(--text-muted);
+  background: var(--success-light); color: var(--success);
   font-size: 12px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase;
 }
 .layer-header-label { color: var(--text-muted); font-size: 13px; }
@@ -282,8 +302,8 @@ code, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monosp
 .task-meta { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 13px; flex-shrink: 0; }
 .task-state-icon { font-size: 12px; cursor: help; flex-shrink: 0; }
 .task-external-dep {
-  padding: 1px 6px; border: 1px solid rgba(215, 155, 69, 0.35); border-radius: var(--radius);
-  color: var(--warning); background: rgba(215, 155, 69, 0.1); font-size: 11px; font-weight: 600;
+  padding: 1px 6px; border: 1px solid var(--warning-border); border-radius: var(--radius);
+  color: var(--warning); background: var(--warning-light); font-size: 11px; font-weight: 600;
 }
 
 /* Progress */
@@ -357,7 +377,7 @@ code, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monosp
 .dep-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dep-scope {
   margin-left: auto; padding: 1px 5px; border-radius: var(--radius);
-  background: rgba(215, 155, 69, 0.11); color: var(--warning); font-size: 10px; font-weight: 600;
+  background: var(--warning-light); color: var(--warning); font-size: 10px; font-weight: 600;
 }
 .dep-remove { margin-left: auto; border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 14px; }
 .dep-scope + .dep-remove { margin-left: 0; }
@@ -398,7 +418,7 @@ code, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monosp
 /* Toast */
 .toast-container { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); z-index: 60; display: flex; flex-direction: column; gap: 6px; }
 .toast { padding: 8px 16px; border-radius: var(--radius); font-size: 13px; animation: fadeIn 0.15s ease-out; border: 1px solid; }
-.toast-error { background: rgba(217, 101, 101, 0.1); border-color: var(--danger); color: var(--danger); }
+.toast-error { background: var(--danger-light); border-color: var(--danger); color: var(--danger); }
 .toast-info { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
 
 /* Graph */
