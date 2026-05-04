@@ -1,5 +1,13 @@
 import type { Task, Dependency, TaskStatus } from './types';
 
+export interface SiblingGraph {
+  siblingIds: Set<string>;
+  taskMap: Map<string, Task>;
+  inDegree: Map<string, number>;
+  adjList: Map<string, string[]>;
+  reverseAdjList: Map<string, string[]>;
+}
+
 export function getEffectiveStatus(task: Task): TaskStatus {
   if (task.subtasks.length === 0) return task.status;
   if (task.subtasks.every(t => getEffectiveStatus(t) === 'done')) return 'done';
@@ -40,49 +48,57 @@ export function sortSiblings(siblings: Task[], dependencies: Dependency[], mode:
       break;
     case 'manual':
     default:
-      // Topological sort among siblings using their dependencies
       return topologicalSortSiblings(siblings, dependencies);
   }
 
   return sorted;
 }
 
-function topologicalSortSiblings(siblings: Task[], dependencies: Dependency[]): Task[] {
+export function buildSiblingGraph(siblings: Task[], dependencies: Dependency[]): SiblingGraph {
   const siblingIds = new Set(siblings.map(t => t.id));
   const taskMap = new Map(siblings.map(t => [t.id, t]));
 
   const inDegree = new Map<string, number>();
   const adjList = new Map<string, string[]>();
+  const reverseAdjList = new Map<string, string[]>();
 
   for (const task of siblings) {
     inDegree.set(task.id, 0);
     adjList.set(task.id, []);
+    reverseAdjList.set(task.id, []);
   }
 
   for (const dep of dependencies) {
     if (siblingIds.has(dep.fromTaskId) && siblingIds.has(dep.toTaskId)) {
       adjList.get(dep.fromTaskId)!.push(dep.toTaskId);
+      reverseAdjList.get(dep.toTaskId)!.push(dep.fromTaskId);
       inDegree.set(dep.toTaskId, (inDegree.get(dep.toTaskId) || 0) + 1);
     }
   }
 
+  return { siblingIds, taskMap, inDegree, adjList, reverseAdjList };
+}
+
+function getTopologicalLayersFromGraph(graph: SiblingGraph): { layers: Task[][]; orderIds: string[]; hasCycle: boolean } {
   const queue: string[] = [];
+  const inDegree = new Map(graph.inDegree);
   for (const [id, degree] of inDegree) {
     if (degree === 0) queue.push(id);
   }
 
-  const result: Task[] = [];
   const layers: Task[][] = [];
+  const orderIds: string[] = [];
 
   while (queue.length > 0) {
     const layer: Task[] = [];
     const nextQueue: string[] = [];
 
     for (const id of queue) {
-      const task = taskMap.get(id)!;
+      const task = graph.taskMap.get(id)!;
       layer.push(task);
+      orderIds.push(id);
 
-      for (const neighbor of adjList.get(id) || []) {
+      for (const neighbor of graph.adjList.get(id) || []) {
         const newDegree = (inDegree.get(neighbor) || 1) - 1;
         inDegree.set(neighbor, newDegree);
         if (newDegree === 0) nextQueue.push(neighbor);
@@ -94,63 +110,31 @@ function topologicalSortSiblings(siblings: Task[], dependencies: Dependency[]): 
     queue.push(...nextQueue);
   }
 
-  // If cycle detected, return original order
   const visitedCount = layers.reduce((sum, l) => sum + l.length, 0);
-  if (visitedCount < siblings.length) return siblings;
+  return { layers, orderIds, hasCycle: visitedCount < graph.taskMap.size };
+}
+
+function topologicalSortSiblings(siblings: Task[], dependencies: Dependency[]): Task[] {
+  const graph = buildSiblingGraph(siblings, dependencies);
+  const { layers, hasCycle } = getTopologicalLayersFromGraph(graph);
+  if (hasCycle) return siblings;
 
   return layers.flat();
 }
 
 export function getLayers(siblings: Task[], dependencies: Dependency[]): Task[][] {
-  const siblingIds = new Set(siblings.map(t => t.id));
-  const taskMap = new Map(siblings.map(t => [t.id, t]));
-
-  const inDegree = new Map<string, number>();
-  const adjList = new Map<string, string[]>();
-
-  for (const task of siblings) {
-    inDegree.set(task.id, 0);
-    adjList.set(task.id, []);
-  }
-
-  for (const dep of dependencies) {
-    if (siblingIds.has(dep.fromTaskId) && siblingIds.has(dep.toTaskId)) {
-      adjList.get(dep.fromTaskId)!.push(dep.toTaskId);
-      inDegree.set(dep.toTaskId, (inDegree.get(dep.toTaskId) || 0) + 1);
-    }
-  }
-
-  const queue: string[] = [];
-  for (const [id, degree] of inDegree) {
-    if (degree === 0) queue.push(id);
-  }
-
-  const layers: Task[][] = [];
-
-  while (queue.length > 0) {
-    const layer: Task[] = [];
-    const nextQueue: string[] = [];
-
-    for (const id of queue) {
-      const task = taskMap.get(id)!;
-      layer.push(task);
-
-      for (const neighbor of adjList.get(id) || []) {
-        const newDegree = (inDegree.get(neighbor) || 1) - 1;
-        inDegree.set(neighbor, newDegree);
-        if (newDegree === 0) nextQueue.push(neighbor);
-      }
-    }
-
-    layers.push(layer);
-    queue.length = 0;
-    queue.push(...nextQueue);
-  }
-
-  const visitedCount = layers.reduce((sum, l) => sum + l.length, 0);
-  if (visitedCount < siblings.length) return [siblings];
+  const graph = buildSiblingGraph(siblings, dependencies);
+  const { layers, hasCycle } = getTopologicalLayersFromGraph(graph);
+  if (hasCycle) return [siblings];
 
   return layers;
+}
+
+export function getTopologicalOrder(siblings: Task[], dependencies: Dependency[]): Task[] | null {
+  const graph = buildSiblingGraph(siblings, dependencies);
+  const { orderIds, hasCycle } = getTopologicalLayersFromGraph(graph);
+  if (hasCycle) return null;
+  return orderIds.map(id => graph.taskMap.get(id)!);
 }
 
 export function wouldCreateCycle(

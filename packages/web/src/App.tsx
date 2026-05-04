@@ -8,67 +8,45 @@ import ImportModal from './components/ImportModal';
 import Toolbar from './components/Toolbar';
 import ToastContainer from './components/Toast';
 import { useStore } from './store';
-
-function parsePath(path: string): { view: 'board' | 'project'; projectId: string | null } {
-  const match = path.match(/^\/project\/(.+)$/);
-  if (match) return { view: 'project', projectId: decodeURIComponent(match[1]) };
-  return { view: 'board', projectId: null };
-}
+import { loadStoredData, parseRoute, saveStoredData, showToast } from './browser';
 
 export default function App() {
   const currentView = useStore((s) => s.currentView);
   const viewMode = useStore((s) => s.viewMode);
   const selectedTaskId = useStore((s) => s.selectedTaskId);
   const loadData = useStore((s) => s.loadData);
-  const goToBoard = useStore((s) => s.goToBoard);
-  const goToProject = useStore((s) => s.goToProject);
+  const syncRoute = useStore((s) => s.syncRoute);
   const startImport = useStore((s) => s.startImport);
 
   useEffect(() => {
-    const saved = localStorage.getItem('ordoflow-data');
-    if (saved) {
-      try {
-        const data = JSON.parse(saved);
-        loadData({
-          root: data.root,
-          inbox: data.inbox,
-          dependencies: data.dependencies,
-        });
-      } catch (e) {
-        console.error('Failed to load saved data:', e);
-      }
+    try {
+      const data = loadStoredData();
+      if (data) loadData(data);
+    } catch (e) {
+      console.error('Failed to load saved data:', e);
     }
   }, [loadData]);
 
   useEffect(() => {
-    const { view, projectId } = parsePath(window.location.pathname);
-    if (view === 'project' && projectId) {
-      goToProject(projectId);
-      window.history.replaceState(null, '', `/project/${projectId}`);
-    }
+    syncRoute(parseRoute(window.location.pathname));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const handlePopState = () => {
-      const { view, projectId } = parsePath(window.location.pathname);
-      if (view === 'project' && projectId) {
-        goToProject(projectId);
-      } else {
-        goToBoard();
-      }
+      syncRoute(parseRoute(window.location.pathname));
     };
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [goToBoard, goToProject]);
+  }, [syncRoute]);
 
   useEffect(() => {
     const unsub = useStore.subscribe((state) => {
-      localStorage.setItem('ordoflow-data', JSON.stringify({
+      saveStoredData({
         root: state.root,
         inbox: state.inbox,
         dependencies: state.dependencies,
-      }));
+      });
     });
     return unsub;
   }, []);
@@ -88,9 +66,7 @@ export default function App() {
       reader.onload = () => {
         const result = startImport(reader.result as string);
         if (!result.valid) {
-          window.dispatchEvent(new CustomEvent('ordoflow-toast', {
-            detail: { message: result.errors.join('. '), type: 'error' },
-          }));
+          showToast(result.errors.join('. '), 'error');
         }
       };
       reader.readAsText(file);
@@ -108,7 +84,7 @@ export default function App() {
     <ReactFlowProvider>
       <div className="app">
         <Toolbar />
-        <main className="main-content" style={{ paddingTop: 48 }}>
+        <main className="main-content">
           {currentView === 'board' ? (
             <Board />
           ) : viewMode === 'list' ? (

@@ -1,7 +1,15 @@
 import { useState, useRef } from 'react';
 import { useStore } from '../store';
 import { INBOX_ID, findTaskById } from '@ordoflow/core';
-import { callAI, parseAIResponse, PROVIDER_DEFAULTS, type AIProvider } from '../ai';
+import {
+  buildAIWorkspaceContext,
+  callAI,
+  normalizeAIResponse,
+  parseAIResponse,
+  PROVIDER_DEFAULTS,
+  type AIProvider,
+} from '../ai';
+import { showToast } from '../browser';
 
 type AIFlowStep = 'input' | 'confirm' | 'loading';
 
@@ -19,8 +27,11 @@ export default function Toolbar() {
   const addDependency = useStore((s) => s.addDependency);
   const aiConfig = useStore((s) => s.aiConfig);
   const setAIConfig = useStore((s) => s.setAIConfig);
+  const workspaceMemory = useStore((s) => s.workspaceMemory);
+  const setWorkspaceMemory = useStore((s) => s.setWorkspaceMemory);
   const exportAll = useStore((s) => s.exportAll);
   const startImport = useStore((s) => s.startImport);
+  const dependencies = useStore((s) => s.dependencies);
 
   const [showSettings, setShowSettings] = useState(false);
   const [aiInput, setAiInput] = useState('');
@@ -36,12 +47,14 @@ export default function Toolbar() {
   const [formApiKey, setFormApiKey] = useState(aiConfig.apiKey);
   const [formBaseUrl, setFormBaseUrl] = useState(aiConfig.baseUrl);
   const [formModel, setFormModel] = useState(aiConfig.model);
+  const [formMemory, setFormMemory] = useState(workspaceMemory);
 
   const openSettings = () => {
     setFormProvider(aiConfig.provider);
     setFormApiKey(aiConfig.apiKey);
     setFormBaseUrl(aiConfig.baseUrl);
     setFormModel(aiConfig.model);
+    setFormMemory(workspaceMemory);
     setShowSettings(true);
   };
 
@@ -53,6 +66,7 @@ export default function Toolbar() {
 
   const handleSaveSettings = () => {
     setAIConfig({ provider: formProvider, apiKey: formApiKey, baseUrl: formBaseUrl, model: formModel });
+    setWorkspaceMemory(formMemory);
     setShowSettings(false);
   };
 
@@ -72,6 +86,7 @@ export default function Toolbar() {
     try {
       const existingProjects = root.subtasks.map((t) => ({ id: t.id, name: t.title }));
       const projectContext = existingProjects.map((p) => p.name).join(', ') || 'none';
+      const workspaceContext = buildAIWorkspaceContext(root, inbox, dependencies, workspaceMemory);
 
       const granularityPrompt = {
         high: 'Break into 3-5 high-level milestones.',
@@ -79,13 +94,15 @@ export default function Toolbar() {
         detailed: 'Break into 15-25 detailed steps.',
       }[granularity];
 
-      const enhancedInput = `Existing projects: ${projectContext}
+      const enhancedInput = `${workspaceContext}
+
+Existing projects: ${projectContext}
 ${granularityPrompt}
 
 User wants to: ${aiInput}`;
 
       const raw = await callAI(aiConfig, enhancedInput);
-      const parsed = parseAIResponse(raw);
+      const parsed = normalizeAIResponse(parseAIResponse(raw));
 
       // Determine target project
       let parentId = targetProjectId;
@@ -105,7 +122,7 @@ User wants to: ${aiInput}`;
       parsed.tasks.forEach((t) => {
         const task = addSubtask(parentId, t.title, {
           estimatedMinutes: t.estimatedMinutes,
-          energyLevel: t.energyLevel as any,
+          energyLevel: t.energyLevel,
         });
         taskMap.set(t.title, task.id);
       });
@@ -120,9 +137,7 @@ User wants to: ${aiInput}`;
       });
 
       if (skippedCycles > 0) {
-        window.dispatchEvent(new CustomEvent('ordoflow-toast', {
-          detail: { message: `Skipped ${skippedCycles} cycle-causing dependencies`, type: 'info' },
-        }));
+        showToast(`Skipped ${skippedCycles} invalid dependencies`);
       }
 
       // Navigate to the project we just added to
@@ -131,10 +146,8 @@ User wants to: ${aiInput}`;
       }
 
       setAiInput('');
-    } catch (err: any) {
-      window.dispatchEvent(new CustomEvent('ordoflow-toast', {
-        detail: { message: err.message || 'AI breakdown failed', type: 'error' },
-      }));
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'AI breakdown failed', 'error');
     } finally {
       setAiFlowStep('input');
     }
@@ -157,25 +170,28 @@ User wants to: ${aiInput}`;
         )}
 
         <div className="toolbar-center">
-          <div className="ai-input-group">
-            <input
-              type="text"
-              value={aiInput}
-              onChange={(e) => setAiInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleStartAI()}
-              placeholder="Break down a goal with AI..."
-              className="ai-input"
-              disabled={!aiConfig.apiKey || aiFlowStep === 'loading'}
-            />
-            <button
-              onClick={handleStartAI}
-              disabled={!aiInput.trim() || !aiConfig.apiKey || aiFlowStep === 'loading'}
-              className="ai-btn"
-            >
-              {aiFlowStep === 'loading' ? '...' : 'Break Down'}
-            </button>
-            {!aiConfig.apiKey && <button onClick={openSettings} className="settings-link">Set API Key</button>}
-          </div>
+          {aiConfig.apiKey ? (
+            <div className="ai-input-group">
+              <input
+                type="text"
+                value={aiInput}
+                onChange={(e) => setAiInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleStartAI()}
+                placeholder="Break down a goal with AI..."
+                className="ai-input"
+                disabled={aiFlowStep === 'loading'}
+              />
+              <button
+                onClick={handleStartAI}
+                disabled={!aiInput.trim() || aiFlowStep === 'loading'}
+                className="ai-btn"
+              >
+                {aiFlowStep === 'loading' ? '...' : 'Break Down'}
+              </button>
+            </div>
+          ) : (
+            <button onClick={openSettings} className="ai-setup-btn">Set up AI breakdown</button>
+          )}
         </div>
 
         <div className="toolbar-right">
@@ -250,6 +266,16 @@ User wants to: ${aiInput}`;
             <input type="text" value={formModel} onChange={(e) => setFormModel(e.target.value)} className="field-input mono" />
             {formProvider === 'deepseek' && <p className="field-hint">DeepSeek uses OpenAI-compatible API.</p>}
             {formProvider === 'custom' && <p className="field-hint">Any OpenAI-compatible endpoint.</p>}
+
+            <label className="field-label">Workspace Memory</label>
+            <textarea
+              value={formMemory}
+              onChange={(e) => setFormMemory(e.target.value)}
+              rows={5}
+              className="field-input field-textarea"
+              placeholder="Persistent preferences, project constraints, personal context, recurring goals..."
+            />
+            <p className="field-hint">AI breakdowns include this local memory plus a fresh summary of current todos.</p>
             <div className="modal-actions">
               <button onClick={() => setShowSettings(false)} className="btn-secondary">Cancel</button>
               <button onClick={handleSaveSettings} className="btn-primary">Save</button>
@@ -274,9 +300,7 @@ User wants to: ${aiInput}`;
                 reader.onload = () => {
                   const result = startImport(reader.result as string);
                   if (!result.valid) {
-                    window.dispatchEvent(new CustomEvent('ordoflow-toast', {
-                      detail: { message: result.errors.join('. '), type: 'error' },
-                    }));
+                    showToast(result.errors.join('. '), 'error');
                   }
                 };
                 reader.readAsText(file);

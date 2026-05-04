@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   createTask, findTaskById, findParentOf, updateTaskInTree,
   removeTaskFromTree, addSubtaskToTree, countRemaining, countTotal,
+  createRoot, createInbox,
 } from '../types';
 import { sortSiblings, getLayers, wouldCreateCycle, getEffectiveStatus } from '../topology';
 import { calculateProgress } from '../progress';
+import { canAddDependency } from '../workspace';
 import type { Task, Dependency } from '../types';
 
 function dep(id: string, from: string, to: string): Dependency {
@@ -140,6 +142,30 @@ describe('wouldCreateCycle', () => {
 
   it('returns true for self-loop', () => {
     expect(wouldCreateCycle([], 'a', 'a')).toBe(true);
+  });
+});
+
+describe('canAddDependency', () => {
+  it('allows cross-project dependencies outside inbox', () => {
+    const a = makeTask('a', 'A');
+    const b = makeTask('b', 'B');
+    const root = createRoot();
+    root.subtasks = [
+      makeTask('p1', 'Project 1', { subtasks: [a] }),
+      makeTask('p2', 'Project 2', { subtasks: [b] }),
+    ];
+
+    expect(canAddDependency([], 'a', 'b', { root, inbox: createInbox() })).toEqual({ ok: true });
+  });
+
+  it('rejects inbox dependencies', () => {
+    const inbox = createInbox();
+    inbox.subtasks = [makeTask('i1', 'Inbox task'), makeTask('i2', 'Inbox task 2')];
+
+    expect(canAddDependency([], 'i1', 'i2', { root: createRoot(), inbox })).toEqual({
+      ok: false,
+      reason: 'inbox',
+    });
   });
 });
 

@@ -60,7 +60,8 @@ export default function LayerSection({ layerIndex, tasks, allTasks, isActionable
     <div className="layer-section">
       <div className="layer-header">
         <span className="layer-header-title">
-          Layer {layerIndex}
+          <span>{isActionable ? 'Actionable' : `Layer ${layerIndex}`}</span>
+          {isActionable && <span className="layer-header-label">next up</span>}
         </span>
         <select
           value={sortMode}

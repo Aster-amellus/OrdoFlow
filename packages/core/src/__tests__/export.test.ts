@@ -117,6 +117,26 @@ describe('validateImport', () => {
     const result = validateImport('{"version":1,"data":{"inbox":{},"dependencies":[]}}');
     expect(result.valid).toBe(false);
   });
+
+  it('rejects dependency cycles in imported data', () => {
+    const root = makeRoot();
+    root.subtasks = [
+      makeTask('p1', 'Project', { subtasks: [makeTask('a', 'A'), makeTask('b', 'B')] }),
+    ];
+    const json = JSON.stringify({
+      version: 1,
+      exportedAt: '',
+      type: 'full',
+      data: {
+        root,
+        inbox: makeInbox(),
+        dependencies: [makeDep('d1', 'a', 'b'), makeDep('d2', 'b', 'a')],
+      },
+    });
+
+    const result = validateImport(json);
+    expect(result.valid).toBe(false);
+  });
 });
 
 describe('mergeImport', () => {

@@ -1,36 +1,29 @@
 import { create } from 'zustand';
 import { nanoid } from 'nanoid';
-import type { Task, Dependency, TaskStatus, EnergyLevel } from '@ordoflow/core';
+import type { Task, Dependency, TaskStatus } from '@ordoflow/core';
 import {
-  INBOX_ID, createTask, findTaskById, findParentOf,
+  INBOX_ID, ROOT_ID, createTask, createInbox, createRoot, findTaskById,
   updateTaskInTree, removeTaskFromTree, addSubtaskToTree,
-  wouldCreateCycle,
+  canAddDependency,
 } from '@ordoflow/core';
-import type { ExportPayload, MergeResult } from '@ordoflow/core';
+import type { ExportPayload } from '@ordoflow/core';
 import {
   serializeState, serializeProject, extractProject,
   validateImport, mergeImport,
 } from '@ordoflow/core';
 import type { AIConfig } from '../ai';
-import { PROVIDER_DEFAULTS } from '../ai';
+import {
+  downloadTextFile,
+  loadAIConfig,
+  loadWorkspaceMemory,
+  pushRoute,
+  saveAIConfig,
+  saveWorkspaceMemory,
+  showToast,
+  type RouteState,
+} from '../browser';
 
 export type SortMode = 'manual' | 'priority' | 'deadline' | 'duration' | 'energy';
-
-function loadAIConfig(): AIConfig {
-  try {
-    const saved = localStorage.getItem('ordoflow-ai-config');
-    if (saved) return JSON.parse(saved);
-  } catch {}
-  return { provider: 'openai', apiKey: '', baseUrl: PROVIDER_DEFAULTS.openai.baseUrl, model: PROVIDER_DEFAULTS.openai.model };
-}
-
-function createInbox(): Task {
-  return { id: INBOX_ID, title: 'Inbox', status: 'pending', position: { x: 0, y: 0 }, priority: 0, subtasks: [], tags: [], createdAt: '' };
-}
-
-function createRoot(): Task {
-  return { id: '__root__', title: 'Root', status: 'pending', position: { x: 0, y: 0 }, priority: 0, subtasks: [], tags: [], createdAt: '' };
-}
 
 interface OrdoFlowState {
   root: Task;
@@ -43,6 +36,7 @@ interface OrdoFlowState {
   viewMode: 'list' | 'graph';
   sortModes: Record<string, SortMode>;
   aiConfig: AIConfig;
+  workspaceMemory: string;
 
   // Task ops
   addTopLevelTask: (title: string) => Task;
@@ -58,6 +52,7 @@ interface OrdoFlowState {
   // Navigation
   goToBoard: () => void;
   goToProject: (id: string) => void;
+  syncRoute: (route: RouteState) => void;
 
   // View
   setViewMode: (mode: 'list' | 'graph') => void;
@@ -69,6 +64,7 @@ interface OrdoFlowState {
 
   // AI
   setAIConfig: (config: Partial<AIConfig>) => void;
+  setWorkspaceMemory: (memory: string) => void;
 
   // Data
   loadData: (data: { root?: Task; inbox?: Task; dependencies?: Dependency[] }) => void;
@@ -93,6 +89,7 @@ export const useStore = create<OrdoFlowState>((set, get) => ({
   viewMode: 'list',
   sortModes: {},
   aiConfig: loadAIConfig(),
+  workspaceMemory: loadWorkspaceMemory(),
   importPreview: null,
 
   addTopLevelTask: (title) => {
@@ -127,7 +124,7 @@ export const useStore = create<OrdoFlowState>((set, get) => ({
   },
 
   deleteTask: (id) => {
-    if (id === INBOX_ID || id === '__root__') return;
+    if (id === INBOX_ID || id === ROOT_ID) return;
     set((state) => {
       // Collect all descendant IDs recursively
       const allIds = new Set<string>();
@@ -190,13 +187,21 @@ export const useStore = create<OrdoFlowState>((set, get) => ({
   },
 
   goToBoard: () => {
-    window.history.pushState(null, '', '/');
+    pushRoute({ view: 'board', projectId: null });
     set({ currentView: 'board', currentProjectId: null, selectedTaskId: null });
   },
 
   goToProject: (id) => {
-    window.history.pushState(null, '', `/project/${id}`);
+    pushRoute({ view: 'project', projectId: id });
     set({ currentView: 'project', currentProjectId: id, selectedTaskId: null, viewMode: 'list' });
+  },
+
+  syncRoute: (route) => {
+    if (route.view === 'project') {
+      set({ currentView: 'project', currentProjectId: route.projectId, selectedTaskId: null });
+    } else {
+      set({ currentView: 'board', currentProjectId: null, selectedTaskId: null });
+    }
   },
 
   setViewMode: (mode) => set({ viewMode: mode }),
@@ -205,10 +210,9 @@ export const useStore = create<OrdoFlowState>((set, get) => ({
   },
 
   addDependency: (fromId, toId) => {
-    const { dependencies } = get();
-    if (fromId === toId) return false;
-    if (wouldCreateCycle(dependencies, fromId, toId)) return false;
-    if (dependencies.some(d => d.fromTaskId === fromId && d.toTaskId === toId)) return false;
+    const { dependencies, root, inbox } = get();
+    const check = canAddDependency(dependencies, fromId, toId, { root, inbox });
+    if (!check.ok) return false;
     set((state) => ({ dependencies: [...state.dependencies, { id: nanoid(), fromTaskId: fromId, toTaskId: toId }] }));
     return true;
   },
@@ -220,9 +224,14 @@ export const useStore = create<OrdoFlowState>((set, get) => ({
   setAIConfig: (partial) => {
     set((state) => {
       const next = { ...state.aiConfig, ...partial };
-      localStorage.setItem('ordoflow-ai-config', JSON.stringify(next));
+      saveAIConfig(next);
       return { aiConfig: next };
     });
+  },
+
+  setWorkspaceMemory: (memory) => {
+    saveWorkspaceMemory(memory);
+    set({ workspaceMemory: memory });
   },
 
   loadData: (data) => set({
@@ -246,15 +255,7 @@ export const useStore = create<OrdoFlowState>((set, get) => ({
       // Auto-backup before replacing
       try {
         const backup = serializeState(root, inbox, dependencies);
-        const blob = new Blob([backup], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `ordoflow-backup-${new Date().toISOString().slice(0, 10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        downloadTextFile(`ordoflow-backup-${new Date().toISOString().slice(0, 10)}.json`, backup);
       } catch {}
 
       set({
@@ -274,12 +275,7 @@ export const useStore = create<OrdoFlowState>((set, get) => ({
         dependencies: result.dependencies,
         importPreview: null,
       });
-      window.dispatchEvent(new CustomEvent('ordoflow-toast', {
-        detail: {
-          message: `Imported. Skipped ${result.skipped} duplicates, ${result.cycleSkips} cycles.`,
-          type: 'info',
-        },
-      }));
+      showToast(`Imported. Skipped ${result.skipped} duplicates, ${result.cycleSkips} cycles.`);
     }
   },
 
@@ -288,15 +284,7 @@ export const useStore = create<OrdoFlowState>((set, get) => ({
   exportAll: () => {
     const { root, inbox, dependencies } = get();
     const json = serializeState(root, inbox, dependencies);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `ordoflow-all-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadTextFile(`ordoflow-all-${new Date().toISOString().slice(0, 10)}.json`, json);
   },
 
   exportProject: (projectId) => {
@@ -305,14 +293,6 @@ export const useStore = create<OrdoFlowState>((set, get) => ({
     if (!json) return;
     const project = extractProject(root, projectId);
     const name = project?.title?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project';
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `ordoflow-${name}-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadTextFile(`ordoflow-${name}-${new Date().toISOString().slice(0, 10)}.json`, json);
   },
 }));

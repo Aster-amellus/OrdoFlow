@@ -1,8 +1,16 @@
 import { useEffect, useState } from 'react';
 import type { EnergyLevel, Task } from '@ordoflow/core';
-import { calculateProgress, formatTimeRemaining, findTaskById } from '@ordoflow/core';
+import { calculateProgress, formatTimeRemaining, findParentOf, findTaskById, INBOX_ID } from '@ordoflow/core';
 import { useStore } from '../store';
-import { callAI, parseAIResponse } from '../ai';
+import { buildAIWorkspaceContext, callAI, normalizeAIResponse, parseAIResponse } from '../ai';
+import { showToast } from '../browser';
+
+interface TaskOption {
+  id: string;
+  title: string;
+  path: string;
+  parentId: string;
+}
 
 export default function DetailPanel() {
   const selectedTaskId = useStore((s) => s.selectedTaskId);
@@ -17,6 +25,7 @@ export default function DetailPanel() {
   const addDependency = useStore((s) => s.addDependency);
   const deleteDependency = useStore((s) => s.deleteDependency);
   const aiConfig = useStore((s) => s.aiConfig);
+  const workspaceMemory = useStore((s) => s.workspaceMemory);
 
   const task = selectedTaskId
     ? findTaskById(inbox, selectedTaskId) || findTaskById(root, selectedTaskId)
@@ -31,6 +40,7 @@ export default function DetailPanel() {
   const [newChildTitle, setNewChildTitle] = useState('');
   const [newDepId, setNewDepId] = useState('');
   const [isRefining, setIsRefining] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     if (task) {
@@ -56,27 +66,44 @@ export default function DetailPanel() {
     });
   };
 
-  const handleDelete = () => { deleteTask(task.id); selectTask(null); };
+  const handleDelete = () => setShowDeleteConfirm(true);
+
+  const confirmDelete = () => {
+    deleteTask(task.id);
+    selectTask(null);
+  };
 
   const handleRefine = async () => {
     if (!aiConfig.apiKey || isRefining) return;
     setIsRefining(true);
     try {
-      const raw = await callAI(aiConfig, `Break down this task into 3-8 smaller subtasks with dependencies:\nTitle: ${task.title}\nDescription: ${task.description || 'none'}\nEstimated time: ${task.estimatedMinutes || 0} minutes\n\nTasks should sum to approximately ${task.estimatedMinutes || 60} minutes.`);
-      const parsed = parseAIResponse(raw);
+      const workspaceContext = buildAIWorkspaceContext(root, inbox, dependencies, workspaceMemory);
+      const raw = await callAI(aiConfig, `${workspaceContext}
+
+Break down this selected task into 3-8 smaller subtasks with dependencies:
+Title: ${task.title}
+Description: ${task.description || 'none'}
+Estimated time: ${task.estimatedMinutes || 0} minutes
+
+Tasks should sum to approximately ${task.estimatedMinutes || 60} minutes.`);
+      const parsed = normalizeAIResponse(parseAIResponse(raw));
+      const taskMap = new Map<string, string>();
       for (const t of parsed.tasks) {
-        addSubtask(task.id, t.title, {
+        const child = addSubtask(task.id, t.title, {
           estimatedMinutes: t.estimatedMinutes,
-          energyLevel: t.energyLevel as any,
+          energyLevel: t.energyLevel,
         });
+        taskMap.set(t.title, child.id);
       }
-      window.dispatchEvent(new CustomEvent('ordoflow-toast', {
-        detail: { message: `AI broke down into ${parsed.tasks.length} subtasks`, type: 'info' },
-      }));
-    } catch (err: any) {
-      window.dispatchEvent(new CustomEvent('ordoflow-toast', {
-        detail: { message: err.message || 'Refine failed', type: 'error' },
-      }));
+      let skipped = 0;
+      for (const dep of parsed.dependencies) {
+        const fromId = taskMap.get(dep.from);
+        const toId = taskMap.get(dep.to);
+        if (!fromId || !toId || !addDependency(fromId, toId)) skipped++;
+      }
+      showToast(`AI broke down into ${parsed.tasks.length} subtasks${skipped ? `, skipped ${skipped} deps` : ''}`);
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Refine failed', 'error');
     } finally {
       setIsRefining(false);
     }
@@ -88,14 +115,23 @@ export default function DetailPanel() {
   const blockedBy = dependencies.filter((d) => d.toTaskId === task.id);
   const blocking = dependencies.filter((d) => d.fromTaskId === task.id);
 
-  const allTasks: { id: string; title: string }[] = [];
-  const collectLeaves = (t: Task) => {
-    if (t.subtasks.length === 0) allTasks.push({ id: t.id, title: t.title });
-    else t.subtasks.forEach(collectLeaves);
+  const allTasks: TaskOption[] = [];
+  const collectTasks = (t: Task, parentId: string, prefix: string) => {
+    const path = prefix ? `${prefix} / ${t.title}` : t.title;
+    allTasks.push({ id: t.id, title: t.title, path, parentId });
+    t.subtasks.forEach(child => collectTasks(child, t.id, path));
   };
-  collectLeaves(root);
-  collectLeaves(inbox);
-  const availableDeps = allTasks.filter((t) => t.id !== task.id);
+  root.subtasks.forEach(project => collectTasks(project, root.id, ''));
+  const currentParent = findParentOf(root, task.id) || findParentOf(inbox, task.id);
+  const availableDeps = allTasks.filter((t) => t.id !== task.id && currentParent?.id !== INBOX_ID);
+  const taskById = new Map(allTasks.map(t => [t.id, t]));
+
+  const depLabel = (id: string): string => taskById.get(id)?.path || '?';
+  const depScope = (id: string): string => {
+    const other = taskById.get(id);
+    if (!other || !currentParent) return '';
+    return other.parentId === currentParent.id ? '' : 'External';
+  };
 
   const estimated = task.estimatedMinutes || 0;
 
@@ -202,19 +238,23 @@ export default function DetailPanel() {
               <label className="field-label">Dependencies</label>
               <div className="dep-list">
                 {blockedBy.map((d) => {
-                  const from = allTasks.find((t) => t.id === d.fromTaskId);
+                  const scope = depScope(d.fromTaskId);
                   return (
                     <div key={d.id} className="dep-item">
-                      <span className="dep-arrow">←</span> {from?.title || '?'}
+                      <span className="dep-arrow">←</span>
+                      <span className="dep-name">{depLabel(d.fromTaskId)}</span>
+                      {scope && <span className="dep-scope">{scope}</span>}
                       <button onClick={() => deleteDependency(d.id)} className="dep-remove">×</button>
                     </div>
                   );
                 })}
                 {blocking.map((d) => {
-                  const to = allTasks.find((t) => t.id === d.toTaskId);
+                  const scope = depScope(d.toTaskId);
                   return (
                     <div key={d.id} className="dep-item">
-                      <span className="dep-arrow">→</span> {to?.title || '?'}
+                      <span className="dep-arrow">→</span>
+                      <span className="dep-name">{depLabel(d.toTaskId)}</span>
+                      {scope && <span className="dep-scope">{scope}</span>}
                       <button onClick={() => deleteDependency(d.id)} className="dep-remove">×</button>
                     </div>
                   );
@@ -223,20 +263,44 @@ export default function DetailPanel() {
             </>
           )}
 
-          <label className="field-label">Add dependency (blocks this task)</label>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <select value={newDepId} onChange={(e) => setNewDepId(e.target.value)} className="field-input" style={{ flex: 1 }}>
+          {currentParent?.id !== INBOX_ID && (
+            <>
+              <label className="field-label">Add dependency (blocks this task)</label>
+              <div className="inline-field-row">
+                <select value={newDepId} onChange={(e) => setNewDepId(e.target.value)} className="field-input">
               <option value="">Select task...</option>
-              {availableDeps.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
-            </select>
-            <button onClick={() => { if (newDepId) { addDependency(newDepId, task.id); setNewDepId(''); } }} className="btn-secondary" disabled={!newDepId}>Add</button>
-          </div>
+                  {availableDeps.map((t) => <option key={t.id} value={t.id}>{t.path}</option>)}
+                </select>
+                <button
+                  onClick={() => {
+                    if (!newDepId) return;
+                    if (!addDependency(newDepId, task.id)) showToast('Cannot add dependency', 'error');
+                    setNewDepId('');
+                  }}
+                  className="btn-secondary"
+                  disabled={!newDepId}
+                >
+                  Add
+                </button>
+              </div>
+            </>
+          )}
 
           <div className="detail-footer">
             <button onClick={handleDelete} className="btn-danger">Delete Task</button>
           </div>
         </div>
       </div>
+      {showDeleteConfirm && (
+        <div className="confirm-popover" onClick={(e) => e.stopPropagation()}>
+          <h3>Delete task?</h3>
+          <p>This removes the task, its subtasks, and related dependencies.</p>
+          <div className="modal-actions">
+            <button onClick={() => setShowDeleteConfirm(false)} className="btn-secondary">Cancel</button>
+            <button onClick={confirmDelete} className="btn-danger-inline">Delete</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

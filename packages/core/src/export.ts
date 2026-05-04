@@ -1,6 +1,6 @@
 import type { Task, Dependency } from './types';
-import { INBOX_ID, addSubtaskToTree, findTaskById } from './types';
-import { wouldCreateCycle } from './topology';
+import { INBOX_ID, createInbox } from './types';
+import { canAddDependency, validateWorkspaceData } from './workspace';
 
 export interface ExportPayload {
   version: number;
@@ -17,10 +17,6 @@ export interface ExportPayload {
 export type ImportValidationResult =
   | { valid: true; data: ExportPayload }
   | { valid: false; errors: string[] };
-
-function makeTimestamp(): string {
-  return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-}
 
 /** Serialize the full workspace to a formatted JSON string */
 export function serializeState(root: Task, inbox: Task, deps: Dependency[]): string {
@@ -66,7 +62,7 @@ export function serializeProject(root: Task, projectId: string, deps: Dependency
     projectName: project.title,
     data: {
       root: { ...root, subtasks: [project] },
-      inbox: { id: INBOX_ID, title: 'Inbox', status: 'pending' as const, position: { x: 0, y: 0 }, priority: 0, subtasks: [], tags: [], createdAt: '' },
+      inbox: createInbox(),
       dependencies: projectDeps,
     },
   };
@@ -92,17 +88,7 @@ export function validateImport(raw: string): ImportValidationResult {
       return { valid: false, errors: ['Missing "data" object'] };
     }
 
-    if (!data.root || typeof data.root !== 'object' || !Array.isArray(data.root.subtasks)) {
-      errors.push('Missing or invalid "data.root" with subtasks array');
-    }
-
-    if (!data.inbox || typeof data.inbox !== 'object') {
-      errors.push('Missing or invalid "data.inbox"');
-    }
-
-    if (!Array.isArray(data.dependencies)) {
-      errors.push('Missing or invalid "data.dependencies" array');
-    }
+    errors.push(...validateWorkspaceData(data).errors);
 
     if (errors.length > 0) {
       return { valid: false, errors };
@@ -170,8 +156,10 @@ export function mergeImport(
       skipped++;
       continue;
     }
-    if (wouldCreateCycle(deps, dep.fromTaskId, dep.toTaskId)) {
-      cycleSkips++;
+    const check = canAddDependency(deps, dep.fromTaskId, dep.toTaskId, { root, inbox });
+    if (!check.ok) {
+      if (check.reason === 'cycle') cycleSkips++;
+      else skipped++;
       continue;
     }
     deps.push(dep);

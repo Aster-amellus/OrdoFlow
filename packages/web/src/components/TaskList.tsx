@@ -1,5 +1,13 @@
 import { useMemo, useState } from 'react';
-import { getLayers, calculateCriticalPath, sortSiblings, findTaskById } from '@ordoflow/core';
+import {
+  getLayers,
+  calculateCriticalPath,
+  sortSiblings,
+  findTaskById,
+  calculateProgress,
+  getEffectiveStatus,
+  formatTimeRemaining,
+} from '@ordoflow/core';
 import { useStore } from '../store';
 import QuickAdd from './QuickAdd';
 import LayerSection from './LayerSection';
@@ -29,9 +37,19 @@ export default function TaskList() {
   const layers = useMemo(() => getLayers(sorted, dependencies), [sorted, dependencies]);
   const criticalPath = useMemo(() => calculateCriticalPath(siblings, dependencies), [siblings, dependencies]);
   const criticalTaskIds = new Set(criticalPath.path.map((t) => t.id));
+  const progress = useMemo(() => calculateProgress(project), [project]);
+  const timeLeft = formatTimeRemaining(progress.estimatedMinutesRemaining);
 
-  const isLayerDone = (layer: typeof siblings) => layer.every((t) => t.status === 'done');
-  const actionableIndex = layers.findIndex((l) => !isLayerDone(l));
+  const isTaskBlocked = (taskId: string) => dependencies
+    .filter(dep => dep.toTaskId === taskId)
+    .some(dep => {
+      const blocker = findTaskById(root, dep.fromTaskId) || findTaskById(inbox, dep.fromTaskId);
+      return blocker && getEffectiveStatus(blocker) !== 'done';
+    });
+  const isLayerDone = (layer: typeof siblings) => layer.every((t) => getEffectiveStatus(t) === 'done');
+  const actionableIndex = layers.findIndex((l) =>
+    l.some((task) => getEffectiveStatus(task) !== 'done' && !isTaskBlocked(task.id))
+  );
 
   const handleDeleteSelected = () => {
     if (selectedTaskIds.size === 0) return;
@@ -63,6 +81,23 @@ export default function TaskList() {
   return (
     <div className="task-list">
       <QuickAdd />
+
+      <div className="project-summary">
+        <div>
+          <div className="project-summary-title">{project.title}</div>
+          <div className="project-summary-meta">
+            {progress.done}/{progress.total} done
+            {timeLeft ? ` · ${timeLeft} remaining` : ''}
+            {criticalPath.totalMinutes > 0 ? ` · critical path ${formatTimeRemaining(criticalPath.totalMinutes)}` : ''}
+          </div>
+        </div>
+        <div className="project-summary-progress">
+          <div className="progress-bar">
+            <div className="progress-bar-fill" style={{ width: `${progress.percentage}%` }} />
+          </div>
+          <span className="progress-text">{progress.percentage}%</span>
+        </div>
+      </div>
 
       <div className="task-list-toolbar">
         <button

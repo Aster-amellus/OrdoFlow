@@ -1,17 +1,21 @@
 import { useState } from 'react';
 import { useStore } from '../store';
-import { countRemaining } from '@ordoflow/core';
+import { calculateProgress, countRemaining, formatTimeRemaining } from '@ordoflow/core';
 
 export default function Board() {
   const root = useStore((s) => s.root);
   const inbox = useStore((s) => s.inbox);
   const goToProject = useStore((s) => s.goToProject);
   const addTopLevelTask = useStore((s) => s.addTopLevelTask);
+  const addSubtask = useStore((s) => s.addSubtask);
   const deleteTask = useStore((s) => s.deleteTask);
   const selectTask = useStore((s) => s.selectTask);
+  const setTaskStatus = useStore((s) => s.setTaskStatus);
   const exportProject = useStore((s) => s.exportProject);
   const [isAdding, setIsAdding] = useState(false);
   const [newName, setNewName] = useState('');
+  const [newInboxTitle, setNewInboxTitle] = useState('');
+  const [deleteProjectId, setDeleteProjectId] = useState<string | null>(null);
 
   const handleAdd = () => {
     if (!newName.trim()) return;
@@ -23,14 +27,19 @@ export default function Board() {
 
   const handleDelete = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (confirm('Delete this project and all its tasks?')) {
-      deleteTask(id);
-    }
+    setDeleteProjectId(id);
   };
 
   const handleEdit = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     selectTask(id);
+  };
+
+  const handleAddInbox = () => {
+    const trimmed = newInboxTitle.trim();
+    if (!trimmed) return;
+    addSubtask('__inbox__', trimmed);
+    setNewInboxTitle('');
   };
 
   return (
@@ -44,17 +53,36 @@ export default function Board() {
         {inbox.subtasks.length > 0 && (
           <div className="inbox-items">
             {inbox.subtasks.slice(0, 5).map((t) => (
-              <div key={t.id} className="inbox-item">
+              <div key={t.id} className={`inbox-item ${t.status === 'done' ? 'inbox-item-done' : ''}`}>
+                <button
+                  className="task-checkbox"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setTaskStatus(t.id, t.status === 'done' ? 'pending' : 'done');
+                  }}
+                >
+                  {t.status === 'done' ? '✓' : ''}
+                </button>
                 <span>{t.title}</span>
               </div>
             ))}
             {inbox.subtasks.length > 5 && (
-              <div className="inbox-item" style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+              <div className="inbox-more">
                 +{inbox.subtasks.length - 5} more...
               </div>
             )}
           </div>
         )}
+        <div className="board-add-row">
+          <input
+            value={newInboxTitle}
+            onChange={(e) => setNewInboxTitle(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddInbox()}
+            placeholder="Add quick task..."
+            className="subtask-add-input"
+          />
+          <button onClick={handleAddInbox} disabled={!newInboxTitle.trim()} className="btn-secondary">Add</button>
+        </div>
       </div>
 
       {/* Projects */}
@@ -66,15 +94,26 @@ export default function Board() {
         <div className="board-project-list">
           {root.subtasks.map((project) => {
             const remaining = countRemaining(project);
+            const progress = calculateProgress(project);
+            const timeLeft = formatTimeRemaining(progress.estimatedMinutesRemaining);
             return (
               <div
                 key={project.id}
                 className="board-project-item"
                 onClick={() => goToProject(project.id)}
               >
-                <span className="board-project-name">{project.title}</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span className="board-project-count">{remaining} remaining</span>
+                <div className="board-project-main">
+                  <span className="board-project-name">{project.title}</span>
+                  <div className="board-project-progress">
+                    <div className="progress-bar">
+                      <div className="progress-bar-fill" style={{ width: `${progress.percentage}%` }} />
+                    </div>
+                    <span className="board-project-count">
+                      {remaining} remaining{timeLeft ? ` · ${timeLeft}` : ''}
+                    </span>
+                  </div>
+                </div>
+                <div className="board-project-actions">
                   <button
                     className="board-project-action"
                     onClick={(e) => handleEdit(e, project.id)}
@@ -114,7 +153,7 @@ export default function Board() {
           ) : (
             <button
               className="board-project-item"
-              style={{ borderStyle: 'dashed', color: 'var(--text-muted)', justifyContent: 'center' }}
+              data-empty-action="true"
               onClick={() => setIsAdding(true)}
             >
               + New Project
@@ -122,6 +161,27 @@ export default function Board() {
           )}
         </div>
       </div>
+
+      {deleteProjectId && (
+        <div className="modal-overlay" onClick={() => setDeleteProjectId(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Delete project?</h3>
+            <p className="field-hint">This removes the project, all nested tasks, and related dependencies.</p>
+            <div className="modal-actions">
+              <button onClick={() => setDeleteProjectId(null)} className="btn-secondary">Cancel</button>
+              <button
+                onClick={() => {
+                  deleteTask(deleteProjectId);
+                  setDeleteProjectId(null);
+                }}
+                className="btn-danger-inline"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

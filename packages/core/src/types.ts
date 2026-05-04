@@ -2,6 +2,7 @@ export type TaskStatus = 'pending' | 'in_progress' | 'done';
 export type EnergyLevel = 'high' | 'medium' | 'low';
 
 export const INBOX_ID = '__inbox__';
+export const ROOT_ID = '__root__';
 
 export interface Task {
   id: string;
@@ -25,6 +26,12 @@ export interface Dependency {
   toTaskId: string;
 }
 
+export interface WorkspaceData {
+  root: Task;
+  inbox: Task;
+  dependencies: Dependency[];
+}
+
 export function createTask(title: string, opts?: Partial<Task>): Task {
   return {
     id: opts?.id || '',
@@ -36,6 +43,22 @@ export function createTask(title: string, opts?: Partial<Task>): Task {
     tags: [],
     createdAt: new Date().toISOString(),
     ...opts,
+  };
+}
+
+export function createInbox(): Task {
+  return createTask('Inbox', { id: INBOX_ID, priority: 0, createdAt: '' });
+}
+
+export function createRoot(): Task {
+  return createTask('Root', { id: ROOT_ID, priority: 0, createdAt: '' });
+}
+
+export function createWorkspace(): WorkspaceData {
+  return {
+    root: createRoot(),
+    inbox: createInbox(),
+    dependencies: [],
   };
 }
 

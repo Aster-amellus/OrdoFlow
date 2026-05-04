@@ -1,6 +1,6 @@
 import { memo, useState } from 'react';
 import type { Task, EnergyLevel } from '@ordoflow/core';
-import { calculateProgress } from '@ordoflow/core';
+import { calculateProgress, findParentOf, findTaskById, getEffectiveStatus } from '@ordoflow/core';
 import { useStore } from '../store';
 
 const energyIcons: Record<EnergyLevel, string> = { high: '⚡', medium: '🟡', low: '🟢' };
@@ -13,6 +13,8 @@ interface Props {
 }
 
 function TaskItem({ task, isLocked, isCritical, isSelectionMode }: Props) {
+  const root = useStore((s) => s.root);
+  const inbox = useStore((s) => s.inbox);
   const setTaskStatus = useStore((s) => s.setTaskStatus);
   const selectTask = useStore((s) => s.selectTask);
   const updateTask = useStore((s) => s.updateTask);
@@ -27,9 +29,27 @@ function TaskItem({ task, isLocked, isCritical, isSelectionMode }: Props) {
   const energy = task.energyLevel ? energyIcons[task.energyLevel] : null;
   const progress = calculateProgress(task);
   const hasChildren = task.subtasks.length > 0;
+  const currentParent = findParentOf(root, task.id) || findParentOf(inbox, task.id);
+  const blockingDeps = dependencies
+    .filter((dep) => dep.toTaskId === task.id)
+    .map((dep) => {
+      const blocker = findTaskById(root, dep.fromTaskId) || findTaskById(inbox, dep.fromTaskId);
+      if (!blocker || getEffectiveStatus(blocker) === 'done') return null;
+      const blockerParent = findParentOf(root, blocker.id) || findParentOf(inbox, blocker.id);
+      return {
+        task: blocker,
+        external: currentParent?.id !== blockerParent?.id,
+      };
+    })
+    .filter((dep): dep is { task: Task; external: boolean } => dep !== null);
+  const isEffectivelyLocked = task.status !== 'done' && Boolean(isLocked || blockingDeps.length > 0);
+  const externalBlockers = blockingDeps.filter(dep => dep.external);
+  const lockedTitle = blockingDeps.length > 0
+    ? `Blocked by ${blockingDeps.map(dep => dep.task.title).join(', ')}`
+    : 'Blocked by dependencies';
 
   const handleToggle = () => {
-    if (isLocked || hasChildren) return;
+    if (isEffectivelyLocked || hasChildren) return;
     setTaskStatus(task.id, task.status === 'done' ? 'pending' : 'done');
   };
 
@@ -54,7 +74,7 @@ function TaskItem({ task, isLocked, isCritical, isSelectionMode }: Props) {
 
   return (
     <div
-      className={`task-item ${task.status === 'done' ? 'task-done' : ''} ${isLocked ? 'task-locked' : ''} ${isCritical ? 'task-critical' : ''} ${isSelected ? 'task-selected' : ''}`}
+      className={`task-item ${task.status === 'done' ? 'task-done' : ''} ${isEffectivelyLocked ? 'task-locked' : ''} ${isCritical ? 'task-critical' : ''} ${isSelected ? 'task-selected' : ''}`}
       onClick={handleClick}
     >
       <button className="task-checkbox" onClick={(e) => { e.stopPropagation(); handleToggle(); }}>
@@ -94,8 +114,9 @@ function TaskItem({ task, isLocked, isCritical, isSelectionMode }: Props) {
         </span>
       )}
 
-      {isLocked && <span style={{ fontSize: 12 }}>🔒</span>}
-      {isCritical && <span style={{ fontSize: 12, cursor: 'help' }} title="If this delays, the whole project delays">🚩</span>}
+      {externalBlockers.length > 0 && <span className="task-external-dep" title={lockedTitle}>External</span>}
+      {isEffectivelyLocked && <span className="task-state-icon" title={lockedTitle}>🔒</span>}
+      {isCritical && <span className="task-state-icon" title="If this delays, the whole project delays">🚩</span>}
     </div>
   );
 }
