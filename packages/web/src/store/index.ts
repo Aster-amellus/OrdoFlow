@@ -11,19 +11,50 @@ import {
   serializeState, serializeProject, extractProject,
   validateImport, mergeImport,
 } from '@ordoflow/core';
-import type { AIConfig } from '../ai';
+import type { AIConfig, NormalizedAIProjectPatchResponse } from '../ai';
 import {
   downloadTextFile,
   loadAIConfig,
+  loadPlanningMethod,
   loadWorkspaceMemory,
   pushRoute,
   saveAIConfig,
+  savePlanningMethod,
   saveWorkspaceMemory,
   showToast,
   type RouteState,
 } from '../browser';
 
 export type SortMode = 'manual' | 'priority' | 'deadline' | 'duration' | 'energy';
+
+export interface PatchApplyResult {
+  inserted: number;
+  updated: number;
+  deleted: number;
+  moved: number;
+  addedDeps: number;
+  removedDeps: number;
+  skippedOps: number;
+}
+
+function collectIds(task: Task, ids: Set<string>): void {
+  ids.add(task.id);
+  task.subtasks.forEach(child => collectIds(child, ids));
+}
+
+function insertSubtaskAt(root: Task, parentId: string, subtask: Task, afterId?: string): Task {
+  if (root.id === parentId) {
+    const nextSubtasks = [...root.subtasks];
+    const index = afterId ? nextSubtasks.findIndex(child => child.id === afterId) : -1;
+    if (index >= 0) nextSubtasks.splice(index + 1, 0, subtask);
+    else nextSubtasks.push(subtask);
+    return { ...root, subtasks: nextSubtasks };
+  }
+  return {
+    ...root,
+    subtasks: root.subtasks.map(child => insertSubtaskAt(child, parentId, subtask, afterId)),
+  };
+}
 
 interface OrdoFlowState {
   root: Task;
@@ -37,6 +68,7 @@ interface OrdoFlowState {
   sortModes: Record<string, SortMode>;
   aiConfig: AIConfig;
   workspaceMemory: string;
+  planningMethod: string;
 
   // Task ops
   addTopLevelTask: (title: string) => Task;
@@ -44,6 +76,16 @@ interface OrdoFlowState {
   updateTask: (id: string, updates: Partial<Task>) => void;
   deleteTask: (id: string) => void;
   deleteSelectedTasks: () => void;
+  replaceProjectPlan: (
+    projectId: string,
+    subtasks: Task[],
+    projectDeps: Dependency[],
+    projectUpdates?: Partial<Task>
+  ) => { addedDeps: number; skippedDeps: number } | null;
+  applyProjectPatch: (
+    projectId: string,
+    patch: NormalizedAIProjectPatchResponse
+  ) => PatchApplyResult | null;
   setTaskStatus: (id: string, status: TaskStatus) => void;
   selectTask: (id: string | null) => void;
   toggleTaskSelection: (id: string) => void;
@@ -65,6 +107,7 @@ interface OrdoFlowState {
   // AI
   setAIConfig: (config: Partial<AIConfig>) => void;
   setWorkspaceMemory: (memory: string) => void;
+  setPlanningMethod: (method: string) => void;
 
   // Data
   loadData: (data: { root?: Task; inbox?: Task; dependencies?: Dependency[] }) => void;
@@ -90,6 +133,7 @@ export const useStore = create<OrdoFlowState>((set, get) => ({
   sortModes: {},
   aiConfig: loadAIConfig(),
   workspaceMemory: loadWorkspaceMemory(),
+  planningMethod: loadPlanningMethod(),
   importPreview: null,
 
   addTopLevelTask: (title) => {
@@ -186,6 +230,216 @@ export const useStore = create<OrdoFlowState>((set, get) => ({
     set({ selectedTaskIds: new Set() });
   },
 
+  replaceProjectPlan: (projectId, subtasks, projectDeps, projectUpdates) => {
+    const state = get();
+    const project = findTaskById(state.root, projectId);
+    if (!project || project.id === ROOT_ID || project.id === INBOX_ID) return null;
+
+    const oldChildIds = new Set<string>();
+    const collectIds = (task: Task) => {
+      oldChildIds.add(task.id);
+      task.subtasks.forEach(collectIds);
+    };
+    project.subtasks.forEach(collectIds);
+
+    const nextRoot = updateTaskInTree(state.root, projectId, {
+      ...projectUpdates,
+      subtasks,
+    });
+
+    const nextDeps = state.dependencies.filter(
+      dep => !oldChildIds.has(dep.fromTaskId) && !oldChildIds.has(dep.toTaskId)
+    );
+
+    let addedDeps = 0;
+    let skippedDeps = 0;
+    for (const dep of projectDeps) {
+      const check = canAddDependency(nextDeps, dep.fromTaskId, dep.toTaskId, {
+        root: nextRoot,
+        inbox: state.inbox,
+      });
+      if (!check.ok) {
+        skippedDeps++;
+        continue;
+      }
+      nextDeps.push(dep);
+      addedDeps++;
+    }
+
+    set({
+      root: nextRoot,
+      dependencies: nextDeps,
+      selectedTaskId: oldChildIds.has(state.selectedTaskId || '') ? projectId : state.selectedTaskId,
+      selectedTaskIds: new Set(),
+    });
+
+    return { addedDeps, skippedDeps };
+  },
+
+  applyProjectPatch: (projectId, patch) => {
+    const state = get();
+    if (projectId === ROOT_ID || projectId === INBOX_ID) return null;
+    if (!findTaskById(state.root, projectId)) return null;
+
+    let nextRoot = state.root;
+    let nextDeps = [...state.dependencies];
+    const insertedKeys = new Map<string, string>();
+    const result: PatchApplyResult = {
+      inserted: 0,
+      updated: 0,
+      deleted: 0,
+      moved: 0,
+      addedDeps: 0,
+      removedDeps: 0,
+      skippedOps: 0,
+    };
+
+    const resolveRef = (ref: string | null | undefined): string | undefined => {
+      if (!ref) return undefined;
+      return insertedKeys.get(ref) || ref;
+    };
+
+    const currentProject = () => findTaskById(nextRoot, projectId);
+    const currentProjectIds = () => {
+      const ids = new Set<string>();
+      const project = currentProject();
+      if (project) collectIds(project, ids);
+      return ids;
+    };
+    const isEditableTask = (id: string | undefined) => {
+      if (!id || id === projectId) return false;
+      return currentProjectIds().has(id);
+    };
+    const isEditableParent = (id: string | undefined) => {
+      if (!id) return false;
+      return currentProjectIds().has(id);
+    };
+
+    const projectUpdates: Partial<Task> = {};
+    if (patch.projectTitle) projectUpdates.title = patch.projectTitle;
+    if (patch.projectDescription) projectUpdates.description = patch.projectDescription;
+    if (Object.keys(projectUpdates).length > 0) {
+      nextRoot = updateTaskInTree(nextRoot, projectId, projectUpdates);
+      result.updated++;
+    }
+
+    for (const op of patch.taskOperations) {
+      if (op.type === 'insert') {
+        const parentId = resolveRef(op.parentId);
+        const afterId = resolveRef(op.afterId);
+        if (!parentId || insertedKeys.has(op.key) || !isEditableParent(parentId)) {
+          result.skippedOps++;
+          continue;
+        }
+
+        const task = createTask(op.title, {
+          id: nanoid(),
+          description: op.description,
+          estimatedMinutes: op.estimatedMinutes,
+          energyLevel: op.energyLevel,
+        });
+        nextRoot = insertSubtaskAt(nextRoot, parentId, task, afterId);
+        insertedKeys.set(op.key, task.id);
+        result.inserted++;
+      } else if (op.type === 'update') {
+        const targetId = resolveRef(op.targetId);
+        if (!isEditableTask(targetId)) {
+          result.skippedOps++;
+          continue;
+        }
+
+        const updates: Partial<Task> = {};
+        if (op.title) updates.title = op.title;
+        if (op.description) updates.description = op.description;
+        if (op.estimatedMinutes) updates.estimatedMinutes = op.estimatedMinutes;
+        if (op.energyLevel) updates.energyLevel = op.energyLevel;
+        if (Object.keys(updates).length === 0) {
+          result.skippedOps++;
+          continue;
+        }
+        nextRoot = updateTaskInTree(nextRoot, targetId!, updates);
+        result.updated++;
+      } else if (op.type === 'delete') {
+        const targetId = resolveRef(op.targetId);
+        if (!isEditableTask(targetId)) {
+          result.skippedOps++;
+          continue;
+        }
+
+        const target = findTaskById(nextRoot, targetId!);
+        if (!target) {
+          result.skippedOps++;
+          continue;
+        }
+        const deletedIds = new Set<string>();
+        collectIds(target, deletedIds);
+        nextRoot = removeTaskFromTree(nextRoot, targetId!);
+        nextDeps = nextDeps.filter(dep => !deletedIds.has(dep.fromTaskId) && !deletedIds.has(dep.toTaskId));
+        for (const [key, id] of insertedKeys) {
+          if (deletedIds.has(id)) insertedKeys.delete(key);
+        }
+        result.deleted++;
+      } else if (op.type === 'move') {
+        const targetId = resolveRef(op.targetId);
+        const parentId = resolveRef(op.parentId);
+        let afterId = resolveRef(op.afterId);
+        if (!isEditableTask(targetId) || !isEditableParent(parentId) || targetId === parentId) {
+          result.skippedOps++;
+          continue;
+        }
+
+        const target = findTaskById(nextRoot, targetId!);
+        if (!target) {
+          result.skippedOps++;
+          continue;
+        }
+        const targetIds = new Set<string>();
+        collectIds(target, targetIds);
+        if (targetIds.has(parentId!) || targetId === afterId || (afterId && targetIds.has(afterId))) {
+          result.skippedOps++;
+          continue;
+        }
+        if (afterId && !currentProjectIds().has(afterId)) afterId = undefined;
+        nextRoot = removeTaskFromTree(nextRoot, targetId!);
+        nextRoot = insertSubtaskAt(nextRoot, parentId!, target, afterId);
+        result.moved++;
+      }
+    }
+
+    for (const op of patch.dependencyOperations) {
+      const fromId = resolveRef(op.fromId);
+      const toId = resolveRef(op.toId);
+      if (!fromId || !toId || fromId === toId) {
+        result.skippedOps++;
+        continue;
+      }
+
+      if (op.type === 'remove') {
+        const before = nextDeps.length;
+        nextDeps = nextDeps.filter(dep => dep.fromTaskId !== fromId || dep.toTaskId !== toId);
+        if (nextDeps.length < before) result.removedDeps++;
+        else result.skippedOps++;
+      } else {
+        const check = canAddDependency(nextDeps, fromId, toId, { root: nextRoot, inbox: state.inbox });
+        if (!check.ok) {
+          result.skippedOps++;
+          continue;
+        }
+        nextDeps.push({ id: nanoid(), fromTaskId: fromId, toTaskId: toId });
+        result.addedDeps++;
+      }
+    }
+
+    set({
+      root: nextRoot,
+      dependencies: nextDeps,
+      selectedTaskIds: new Set(),
+      selectedTaskId: state.selectedTaskId && findTaskById(nextRoot, state.selectedTaskId) ? state.selectedTaskId : null,
+    });
+
+    return result;
+  },
+
   goToBoard: () => {
     pushRoute({ view: 'board', projectId: null });
     set({ currentView: 'board', currentProjectId: null, selectedTaskId: null });
@@ -232,6 +486,11 @@ export const useStore = create<OrdoFlowState>((set, get) => ({
   setWorkspaceMemory: (memory) => {
     saveWorkspaceMemory(memory);
     set({ workspaceMemory: memory });
+  },
+
+  setPlanningMethod: (method) => {
+    savePlanningMethod(method);
+    set({ planningMethod: method });
   },
 
   loadData: (data) => set({

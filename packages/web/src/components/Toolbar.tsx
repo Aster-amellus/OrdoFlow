@@ -29,6 +29,8 @@ export default function Toolbar() {
   const setAIConfig = useStore((s) => s.setAIConfig);
   const workspaceMemory = useStore((s) => s.workspaceMemory);
   const setWorkspaceMemory = useStore((s) => s.setWorkspaceMemory);
+  const planningMethod = useStore((s) => s.planningMethod);
+  const setPlanningMethod = useStore((s) => s.setPlanningMethod);
   const exportAll = useStore((s) => s.exportAll);
   const startImport = useStore((s) => s.startImport);
   const dependencies = useStore((s) => s.dependencies);
@@ -47,14 +49,24 @@ export default function Toolbar() {
   const [formApiKey, setFormApiKey] = useState(aiConfig.apiKey);
   const [formBaseUrl, setFormBaseUrl] = useState(aiConfig.baseUrl);
   const [formModel, setFormModel] = useState(aiConfig.model);
+  const [formWebSearchEnabled, setFormWebSearchEnabled] = useState(aiConfig.webSearchEnabled || false);
+  const [formSearchProvider, setFormSearchProvider] = useState(aiConfig.searchProvider || 'tavily');
+  const [formTavilyApiKey, setFormTavilyApiKey] = useState(aiConfig.tavilyApiKey || '');
+  const [formTavilyMaxResults, setFormTavilyMaxResults] = useState(String(aiConfig.tavilyMaxResults || 5));
   const [formMemory, setFormMemory] = useState(workspaceMemory);
+  const [formPlanningMethod, setFormPlanningMethod] = useState(planningMethod);
 
   const openSettings = () => {
     setFormProvider(aiConfig.provider);
     setFormApiKey(aiConfig.apiKey);
     setFormBaseUrl(aiConfig.baseUrl);
     setFormModel(aiConfig.model);
+    setFormWebSearchEnabled(aiConfig.webSearchEnabled || false);
+    setFormSearchProvider(aiConfig.searchProvider || 'tavily');
+    setFormTavilyApiKey(aiConfig.tavilyApiKey || '');
+    setFormTavilyMaxResults(String(aiConfig.tavilyMaxResults || 5));
     setFormMemory(workspaceMemory);
+    setFormPlanningMethod(planningMethod);
     setShowSettings(true);
   };
 
@@ -65,8 +77,18 @@ export default function Toolbar() {
   };
 
   const handleSaveSettings = () => {
-    setAIConfig({ provider: formProvider, apiKey: formApiKey, baseUrl: formBaseUrl, model: formModel });
+    setAIConfig({
+      provider: formProvider,
+      apiKey: formApiKey,
+      baseUrl: formBaseUrl,
+      model: formModel,
+      webSearchEnabled: formWebSearchEnabled,
+      searchProvider: formSearchProvider,
+      tavilyApiKey: formTavilyApiKey,
+      tavilyMaxResults: Math.max(1, Math.min(20, parseInt(formTavilyMaxResults) || 5)),
+    });
     setWorkspaceMemory(formMemory);
+    setPlanningMethod(formPlanningMethod);
     setShowSettings(false);
   };
 
@@ -98,10 +120,14 @@ export default function Toolbar() {
 
 Existing projects: ${projectContext}
 ${granularityPrompt}
+${planningMethod.trim() ? `\nUser planning method:\n${planningMethod.trim()}\n` : ''}
 
 User wants to: ${aiInput}`;
 
-      const raw = await callAI(aiConfig, enhancedInput);
+      const raw = await callAI(aiConfig, enhancedInput, {
+        webSearch: aiConfig.webSearchEnabled,
+        searchQuery: aiInput,
+      });
       const parsed = normalizeAIResponse(parseAIResponse(raw));
 
       // Determine target project
@@ -264,6 +290,57 @@ User wants to: ${aiInput}`;
             <input type="text" value={formBaseUrl} onChange={(e) => setFormBaseUrl(e.target.value)} className="field-input mono" />
             <label className="field-label">Model</label>
             <input type="text" value={formModel} onChange={(e) => setFormModel(e.target.value)} className="field-input mono" />
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={formWebSearchEnabled}
+                onChange={(e) => setFormWebSearchEnabled(e.target.checked)}
+              />
+              <span>Use web search when available</span>
+            </label>
+            {formWebSearchEnabled && (
+              <>
+                <label className="field-label">Search Provider</label>
+                <div className="provider-options">
+                  <button
+                    onClick={() => setFormSearchProvider('tavily')}
+                    className={`provider-btn ${formSearchProvider === 'tavily' ? 'provider-btn-active' : ''}`}
+                  >
+                    Tavily
+                  </button>
+                  <button
+                    onClick={() => setFormSearchProvider('openai')}
+                    className={`provider-btn ${formSearchProvider === 'openai' ? 'provider-btn-active' : ''}`}
+                  >
+                    OpenAI
+                  </button>
+                </div>
+                {formSearchProvider === 'tavily' ? (
+                  <>
+                    <label className="field-label">Tavily API Key</label>
+                    <input
+                      type="password"
+                      value={formTavilyApiKey}
+                      onChange={(e) => setFormTavilyApiKey(e.target.value)}
+                      placeholder="tvly-... or TAVILY_API_KEY in dev server"
+                      className="field-input"
+                    />
+                    <p className="field-hint">Search first improves the planning prompt, then a separate AI call returns the final JSON. Tavily requests go through the local Vite proxy to avoid browser CORS issues.</p>
+                    <label className="field-label">Tavily Results</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="20"
+                      value={formTavilyMaxResults}
+                      onChange={(e) => setFormTavilyMaxResults(e.target.value)}
+                      className="field-input mono"
+                    />
+                  </>
+                ) : (
+                  <p className="field-hint">OpenAI search uses the Responses API web_search tool and requires OpenAI as the AI provider.</p>
+                )}
+              </>
+            )}
             {formProvider === 'deepseek' && <p className="field-hint">DeepSeek uses OpenAI-compatible API.</p>}
             {formProvider === 'custom' && <p className="field-hint">Any OpenAI-compatible endpoint.</p>}
 
@@ -276,6 +353,16 @@ User wants to: ${aiInput}`;
               placeholder="Persistent preferences, project constraints, personal context, recurring goals..."
             />
             <p className="field-hint">AI breakdowns include this local memory plus a fresh summary of current todos.</p>
+
+            <label className="field-label">Planning Method</label>
+            <textarea
+              value={formPlanningMethod}
+              onChange={(e) => setFormPlanningMethod(e.target.value)}
+              rows={5}
+              className="field-input field-textarea"
+              placeholder="How AI should refine schedules: grouping rules, target task size, dependency style, daily planning habits..."
+            />
+            <p className="field-hint">Project replanning follows this method when redesigning todos and nested tasks.</p>
             <div className="modal-actions">
               <button onClick={() => setShowSettings(false)} className="btn-secondary">Cancel</button>
               <button onClick={handleSaveSettings} className="btn-primary">Save</button>

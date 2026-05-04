@@ -11,6 +11,7 @@ import {
 import { useStore } from '../store';
 import QuickAdd from './QuickAdd';
 import LayerSection from './LayerSection';
+import ProjectPlanner from './ProjectPlanner';
 
 export default function TaskList() {
   const root = useStore((s) => s.root);
@@ -39,6 +40,7 @@ export default function TaskList() {
   const criticalTaskIds = new Set(criticalPath.path.map((t) => t.id));
   const progress = useMemo(() => calculateProgress(project), [project]);
   const timeLeft = formatTimeRemaining(progress.estimatedMinutesRemaining);
+  const canReplanProject = Boolean(currentProjectId && currentProjectId !== '__inbox__');
 
   const isTaskBlocked = (taskId: string) => dependencies
     .filter(dep => dep.toTaskId === taskId)
@@ -70,6 +72,11 @@ export default function TaskList() {
     return (
       <div className="task-list">
         <QuickAdd />
+        {canReplanProject && (
+          <div className="task-list-toolbar">
+            <ProjectPlanner project={project} />
+          </div>
+        )}
         <div className="empty-state">
           <p className="empty-title">No tasks yet</p>
           <p className="empty-subtitle">Type above to add your first task</p>
@@ -100,6 +107,8 @@ export default function TaskList() {
       </div>
 
       <div className="task-list-toolbar">
+        {canReplanProject && <ProjectPlanner project={project} />}
+
         <button
           className={`task-list-toolbar-btn ${isSelectionMode ? 'task-list-toolbar-btn-active' : ''}`}
           onClick={handleToggleSelectionMode}

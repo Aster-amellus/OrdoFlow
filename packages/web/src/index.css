@@ -221,6 +221,8 @@ code, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monosp
 }
 .task-list-toolbar-btn:hover { border-color: var(--border-hover); }
 .task-list-toolbar-btn-active { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.task-list-toolbar-btn-accent { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.task-list-toolbar-btn-accent:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
 .task-list-toolbar-btn-danger { border-color: var(--danger); color: var(--danger); }
 .task-list-toolbar-btn-danger:hover { background: var(--danger); color: #fff; }
 .task-list-toolbar-hint { font-size: 11px; color: var(--text-muted); margin-left: 4px; }
@@ -404,6 +406,7 @@ code, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monosp
 }
 .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 .btn-primary:hover { background: var(--accent-hover); }
+.btn-primary:disabled, .btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-secondary { background: transparent; color: var(--text-secondary); border-color: var(--border); }
 .btn-secondary:hover { border-color: var(--border-hover); }
 .btn-danger { background: transparent; color: var(--danger); border-color: var(--danger); width: 100%; }
@@ -454,7 +457,8 @@ code, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monosp
 
 /* Modal */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 50; display: flex; align-items: center; justify-content: center; }
-.modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 20px; width: min(400px, calc(100vw - 32px)); box-shadow: var(--shadow-md); }
+.modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 20px; width: min(400px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; box-shadow: var(--shadow-md); }
+.modal-wide { width: min(560px, calc(100vw - 32px)); }
 .modal h3 { font-size: 16px; margin-bottom: 12px; }
 .modal .field-label { margin-top: 10px; }
 .modal .field-label:first-of-type { margin-top: 0; }
@@ -467,6 +471,11 @@ code, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monosp
 .provider-btn:hover { border-color: var(--border-hover); }
 .provider-btn-active { border-color: var(--accent); background: var(--accent-light); color: var(--accent); font-weight: 600; }
 .field-hint { font-size: 12px; color: var(--text-muted); margin-top: 4px; font-style: italic; }
+.checkbox-row {
+  display: flex; align-items: center; gap: 8px; margin-top: 10px;
+  color: var(--text-secondary); font-size: 13px; cursor: pointer;
+}
+.checkbox-row input { accent-color: var(--accent); }
 .confirm-popover {
   position: fixed; right: 380px; bottom: 24px; z-index: 70;
   width: 280px; padding: 16px; background: var(--bg-card); border: 1px solid var(--border);

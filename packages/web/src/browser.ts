@@ -5,6 +5,7 @@ import type { Task, Dependency } from '@ordoflow/core';
 export const DATA_STORAGE_KEY = 'ordoflow-data';
 export const AI_CONFIG_STORAGE_KEY = 'ordoflow-ai-config';
 export const MEMORY_STORAGE_KEY = 'ordoflow-memory';
+export const PLANNING_METHOD_STORAGE_KEY = 'ordoflow-planning-method';
 
 export type RouteState =
   | { view: 'board'; projectId: null }
@@ -40,13 +41,29 @@ export function downloadTextFile(filename: string, contents: string, type = 'app
 export function loadAIConfig(): AIConfig {
   try {
     const saved = localStorage.getItem(AI_CONFIG_STORAGE_KEY);
-    if (saved) return JSON.parse(saved) as AIConfig;
+    if (saved) {
+      const parsed = JSON.parse(saved) as Partial<AIConfig>;
+      return {
+        provider: parsed.provider || 'openai',
+        apiKey: parsed.apiKey || '',
+        baseUrl: parsed.baseUrl || PROVIDER_DEFAULTS.openai.baseUrl,
+        model: parsed.model || PROVIDER_DEFAULTS.openai.model,
+        webSearchEnabled: parsed.webSearchEnabled || false,
+        searchProvider: parsed.searchProvider || 'tavily',
+        tavilyApiKey: parsed.tavilyApiKey || '',
+        tavilyMaxResults: parsed.tavilyMaxResults || 5,
+      };
+    }
   } catch {}
   return {
     provider: 'openai',
     apiKey: '',
     baseUrl: PROVIDER_DEFAULTS.openai.baseUrl,
     model: PROVIDER_DEFAULTS.openai.model,
+    webSearchEnabled: false,
+    searchProvider: 'tavily',
+    tavilyApiKey: '',
+    tavilyMaxResults: 5,
   };
 }
 
@@ -64,6 +81,18 @@ export function loadWorkspaceMemory(): string {
 
 export function saveWorkspaceMemory(memory: string): void {
   localStorage.setItem(MEMORY_STORAGE_KEY, memory);
+}
+
+export function loadPlanningMethod(): string {
+  try {
+    return localStorage.getItem(PLANNING_METHOD_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function savePlanningMethod(method: string): void {
+  localStorage.setItem(PLANNING_METHOD_STORAGE_KEY, method);
 }
 
 export function loadStoredData(): { root?: Task; inbox?: Task; dependencies?: Dependency[] } | null {

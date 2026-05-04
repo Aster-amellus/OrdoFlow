@@ -26,6 +26,7 @@ export default function DetailPanel() {
   const deleteDependency = useStore((s) => s.deleteDependency);
   const aiConfig = useStore((s) => s.aiConfig);
   const workspaceMemory = useStore((s) => s.workspaceMemory);
+  const planningMethod = useStore((s) => s.planningMethod);
 
   const task = selectedTaskId
     ? findTaskById(inbox, selectedTaskId) || findTaskById(root, selectedTaskId)
@@ -79,13 +80,17 @@ export default function DetailPanel() {
     try {
       const workspaceContext = buildAIWorkspaceContext(root, inbox, dependencies, workspaceMemory);
       const raw = await callAI(aiConfig, `${workspaceContext}
+${planningMethod.trim() ? `\nUser planning method:\n${planningMethod.trim()}\n` : ''}
 
 Break down this selected task into 3-8 smaller subtasks with dependencies:
 Title: ${task.title}
 Description: ${task.description || 'none'}
 Estimated time: ${task.estimatedMinutes || 0} minutes
 
-Tasks should sum to approximately ${task.estimatedMinutes || 60} minutes.`);
+Tasks should sum to approximately ${task.estimatedMinutes || 60} minutes.`, {
+        webSearch: aiConfig.webSearchEnabled,
+        searchQuery: `${task.title} ${task.description || ''}`,
+      });
       const parsed = normalizeAIResponse(parseAIResponse(raw));
       const taskMap = new Map<string, string>();
       for (const t of parsed.tasks) {
